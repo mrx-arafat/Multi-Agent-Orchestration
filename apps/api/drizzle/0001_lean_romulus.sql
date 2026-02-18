@@ -1,0 +1,2 @@
+CREATE INDEX "idx_stage_executions_workflow_run_id" ON "stage_executions" USING btree ("workflow_run_id");--> statement-breakpoint
+CREATE INDEX "idx_execution_logs_workflow_run_id" ON "execution_logs" USING btree ("workflow_run_id");

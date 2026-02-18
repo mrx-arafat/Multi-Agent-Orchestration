@@ -1,0 +1,27 @@
+import { defineConfig } from 'drizzle-kit';
+import { config } from 'dotenv';
+
+// Load env for drizzle-kit CLI (runs outside Fastify)
+config({ path: '../../.env' });
+
+export default defineConfig({
+  schema: [
+    './src/db/schema/users.ts',
+    './src/db/schema/agents.ts',
+    './src/db/schema/workflow-runs.ts',
+    './src/db/schema/stage-executions.ts',
+    './src/db/schema/execution-logs.ts',
+  ],
+  out: './drizzle',
+  dialect: 'postgresql',
+  dbCredentials: {
+    host: process.env['MAOF_DB_HOST'] ?? 'localhost',
+    port: Number(process.env['MAOF_DB_PORT'] ?? 5432),
+    database: process.env['MAOF_DB_NAME'] ?? 'maof_dev',
+    user: process.env['MAOF_DB_USER'] ?? 'maof',
+    password: process.env['MAOF_DB_PASSWORD'] ?? 'maof_dev_password',
+    ssl: false,
+  },
+  verbose: true,
+  strict: false,
+});

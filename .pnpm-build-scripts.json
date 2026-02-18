@@ -1,0 +1,4 @@
+{
+  "esbuild": true,
+  "msgpackr-extract": true
+}
