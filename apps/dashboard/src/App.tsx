@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { AgentsPage } from './pages/AgentsPage.js';
 import { WorkflowsPage } from './pages/WorkflowsPage.js';
+import { RegisterPage } from './pages/RegisterPage.js';
 
 export function App(){
   return (
@@ -14,6 +15,7 @@ export function App(){
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
 
           {/* Protected routes — wrapped in sidebar Layout */}
           <Route
