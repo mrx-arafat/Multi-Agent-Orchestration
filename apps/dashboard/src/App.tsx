@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './lib/auth-context.js';
+import { ToastProvider } from './components/Toast.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { Layout } from './components/Layout.js';
 import { LoginPage } from './pages/LoginPage.js';
@@ -16,6 +17,7 @@ import { SettingsPage } from './pages/SettingsPage.js';
 export function App(){
   return (
     <AuthProvider>
+    <ToastProvider>
       <BrowserRouter>
         <Routes>
           {/* Public routes */}
@@ -45,6 +47,7 @@ export function App(){
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
+    </ToastProvider>
     </AuthProvider>
   );
 }

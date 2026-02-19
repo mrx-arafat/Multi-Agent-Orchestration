@@ -1,26 +1,35 @@
 /**
  * API client — fetch wrapper with JWT Bearer token injection.
- * Tokens are stored in memory only (no localStorage) for security.
- * Refresh token rotation is handled server-side (Phase 2: httpOnly cookie).
+ * Tokens are persisted to localStorage so sessions survive page reloads.
  */
 
 const API_BASE = '/api';
+const TOKEN_KEY = 'maof_access_token';
+const REFRESH_KEY = 'maof_refresh_token';
 
-let _accessToken: string | null = null;
-let _refreshToken: string | null = null;
+let _accessToken: string | null = localStorage.getItem(TOKEN_KEY);
+let _refreshToken: string | null = localStorage.getItem(REFRESH_KEY);
 
 export function setTokens(accessToken: string, refreshToken: string): void {
   _accessToken = accessToken;
   _refreshToken = refreshToken;
+  localStorage.setItem(TOKEN_KEY, accessToken);
+  localStorage.setItem(REFRESH_KEY, refreshToken);
 }
 
 export function clearTokens(): void {
   _accessToken = null;
   _refreshToken = null;
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(REFRESH_KEY);
 }
 
 export function isAuthenticated(): boolean {
   return _accessToken !== null;
+}
+
+export function getStoredAccessToken(): string | null {
+  return _accessToken;
 }
 
 export interface ApiError {
@@ -403,4 +412,43 @@ export async function getAgent(agentUuid: string): Promise<Agent> {
 
 export async function triggerHealthCheck(agentUuid: string): Promise<{ status: string; latencyMs: number }> {
   return request(`/agents/${agentUuid}/health-check`, { method: 'POST' });
+}
+
+// ── Team Invitations ───────────────────────────────────────────────────────
+
+export interface Invitation {
+  invitationUuid: string;
+  teamUuid: string;
+  inviteCode: string;
+  createdByUserUuid: string;
+  role: string;
+  maxUses: number;
+  useCount: number;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export async function createInvitation(
+  teamUuid: string,
+  params?: { role?: string; maxUses?: number; expiresInHours?: number },
+): Promise<Invitation> {
+  return request<Invitation>(`/teams/${teamUuid}/invitations`, {
+    method: 'POST',
+    body: JSON.stringify(params ?? {}),
+  });
+}
+
+export async function listInvitations(teamUuid: string): Promise<Invitation[]> {
+  return request<Invitation[]>(`/teams/${teamUuid}/invitations`);
+}
+
+export async function revokeInvitation(teamUuid: string, invitationUuid: string): Promise<void> {
+  await request(`/teams/${teamUuid}/invitations/${invitationUuid}`, { method: 'DELETE' });
+}
+
+export async function joinTeam(inviteCode: string): Promise<{ teamUuid: string; role: string }> {
+  return request('/teams/join', {
+    method: 'POST',
+    body: JSON.stringify({ inviteCode }),
+  });
 }

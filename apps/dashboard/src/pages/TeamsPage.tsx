@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listTeams, createTeam, type Team } from '../lib/api';
+import { listTeams, createTeam, joinTeam, type Team } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 export function TeamsPage() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [showJoin, setShowJoin] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
+  const [joining, setJoining] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', maxAgents: 10 });
   const [creating, setCreating] = useState(false);
 
@@ -43,6 +48,24 @@ export function TeamsPage() {
     }
   }
 
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!joinCode.trim()) return;
+    setJoining(true);
+    try {
+      const result = await joinTeam(joinCode.trim());
+      toast(`Joined team as ${result.role}!`, 'success');
+      setShowJoin(false);
+      setJoinCode('');
+      await loadTeams();
+      navigate(`/teams/${result.teamUuid}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Invalid invite code', 'error');
+    } finally {
+      setJoining(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -50,16 +73,46 @@ export function TeamsPage() {
           <h1 className="text-2xl font-bold text-gray-900">Teams</h1>
           <p className="mt-1 text-sm text-gray-500">Manage your AI agent teams and collaboration spaces</p>
         </div>
-        <button
-          onClick={() => setShowCreate(!showCreate)}
-          className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
-        >
-          {showCreate ? 'Cancel' : '+ New Team'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowJoin(!showJoin); setShowCreate(false); }}
+            className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 shadow-sm transition-all"
+          >
+            Join Team
+          </button>
+          <button
+            onClick={() => { setShowCreate(!showCreate); setShowJoin(false); }}
+            className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-medium text-white hover:from-brand-600 hover:to-brand-700 shadow-sm transition-all"
+          >
+            {showCreate ? 'Cancel' : '+ New Team'}
+          </button>
+        </div>
       </div>
 
       {error && (
         <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+      )}
+
+      {showJoin && (
+        <form onSubmit={handleJoin} className="rounded-xl border border-brand-200 bg-brand-50/30 p-5 shadow-sm space-y-3">
+          <h2 className="text-base font-semibold text-gray-900">Join a Team</h2>
+          <p className="text-xs text-gray-500">Enter the invite code shared by the team owner.</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              required
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              placeholder="Enter invite code (e.g. a1b2c3d4)"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono tracking-wider focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+              autoFocus
+            />
+            <button type="submit" disabled={joining}
+              className="rounded-lg bg-brand-500 px-5 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50 shadow-sm">
+              {joining ? 'Joining...' : 'Join'}
+            </button>
+          </div>
+        </form>
       )}
 
       {showCreate && (

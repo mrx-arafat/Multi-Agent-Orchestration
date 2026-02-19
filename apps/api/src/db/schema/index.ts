@@ -8,3 +8,4 @@ export * from './api-tokens.js';
 export * from './teams.js';
 export * from './kanban-tasks.js';
 export * from './agent-messages.js';
+export * from './team-invitations.js';

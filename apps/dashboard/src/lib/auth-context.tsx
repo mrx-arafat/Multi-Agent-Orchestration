@@ -1,16 +1,26 @@
 /**
  * Auth context — provides user state and login/logout actions app-wide.
- * Tokens held in memory via lib/api.ts (never persisted to localStorage).
+ * On mount, tries to restore session from localStorage-persisted tokens.
  */
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
-import { login as apiLogin, setTokens, clearTokens, type UserInfo } from './api.js';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
+import {
+  login as apiLogin,
+  getCurrentUser,
+  setTokens,
+  clearTokens,
+  isAuthenticated,
+  type UserInfo,
+} from './api.js';
 
 interface AuthState {
   user: UserInfo | null;
   isLoading: boolean;
+  /** true while we attempt to restore session from stored token */
+  isRestoring: boolean;
 }
 
-interface AuthContextValue extends AuthState {
+interface AuthContextValue extends Omit<AuthState, 'isRestoring'> {
+  isRestoring: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 }
@@ -18,14 +28,36 @@ interface AuthContextValue extends AuthState {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }){
-  const [state, setState] = useState<AuthState>({ user: null, isLoading: false });
+  const [state, setState] = useState<AuthState>({
+    user: null,
+    isLoading: false,
+    isRestoring: isAuthenticated(),
+  });
+
+  // On mount: if we have a stored token, fetch current user to restore session
+  useEffect(() => {
+    if (!isAuthenticated()) return;
+
+    let cancelled = false;
+    getCurrentUser()
+      .then((user) => {
+        if (!cancelled) setState({ user, isLoading: false, isRestoring: false });
+      })
+      .catch(() => {
+        // Token expired or invalid — clear it
+        clearTokens();
+        if (!cancelled) setState({ user: null, isLoading: false, isRestoring: false });
+      });
+
+    return () => { cancelled = true; };
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     setState((s) => ({ ...s, isLoading: true }));
     try {
       const data = await apiLogin(email, password);
       setTokens(data.accessToken, data.refreshToken);
-      setState({ user: data.user, isLoading: false });
+      setState({ user: data.user, isLoading: false, isRestoring: false });
     } catch (err) {
       setState((s) => ({ ...s, isLoading: false }));
       throw err;
@@ -34,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }){
 
   const logout = useCallback(() => {
     clearTokens();
-    setState({ user: null, isLoading: false });
+    setState({ user: null, isLoading: false, isRestoring: false });
   }, []);
 
   return (

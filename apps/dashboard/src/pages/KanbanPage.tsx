@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import {
+  DndContext,
+  DragOverlay,
+  closestCorners,
+  useSensor,
+  useSensors,
+  PointerSensor,
+  type DragStartEvent,
+  type DragEndEvent,
+  type DragOverEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useDroppable } from '@dnd-kit/core';
+import {
   listKanbanTasks,
   createKanbanTask,
   updateKanbanTaskStatus,
@@ -12,19 +26,119 @@ import {
 } from '../lib/api';
 
 const COLUMNS = [
-  { key: 'backlog', label: 'Backlog', color: 'bg-gray-400' },
-  { key: 'todo', label: 'To Do', color: 'bg-blue-400' },
-  { key: 'in_progress', label: 'In Progress', color: 'bg-yellow-400' },
-  { key: 'review', label: 'Review', color: 'bg-purple-400' },
-  { key: 'done', label: 'Done', color: 'bg-green-400' },
+  { key: 'backlog', label: 'Backlog', color: 'bg-slate-400', headerBg: 'bg-slate-50', ring: 'ring-slate-200' },
+  { key: 'todo', label: 'To Do', color: 'bg-blue-400', headerBg: 'bg-blue-50', ring: 'ring-blue-200' },
+  { key: 'in_progress', label: 'In Progress', color: 'bg-amber-400', headerBg: 'bg-amber-50', ring: 'ring-amber-200' },
+  { key: 'review', label: 'Review', color: 'bg-purple-400', headerBg: 'bg-purple-50', ring: 'ring-purple-200' },
+  { key: 'done', label: 'Done', color: 'bg-emerald-400', headerBg: 'bg-emerald-50', ring: 'ring-emerald-200' },
 ];
 
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: 'border-l-red-500',
-  high: 'border-l-orange-400',
-  medium: 'border-l-yellow-400',
-  low: 'border-l-blue-300',
+const PRIORITY_STYLES: Record<string, { border: string; badge: string; label: string }> = {
+  critical: { border: 'border-l-red-500', badge: 'bg-red-100 text-red-700', label: 'Critical' },
+  high: { border: 'border-l-orange-400', badge: 'bg-orange-100 text-orange-700', label: 'High' },
+  medium: { border: 'border-l-yellow-400', badge: 'bg-yellow-100 text-yellow-700', label: 'Medium' },
+  low: { border: 'border-l-blue-300', badge: 'bg-blue-100 text-blue-700', label: 'Low' },
 };
+
+// ─── Sortable Task Card ────────────────────────────────────────────────────
+
+function TaskCard({ task, agents, isDragging }: { task: KanbanTask; agents: Agent[]; isDragging?: boolean }) {
+  const priority = PRIORITY_STYLES[task.priority] ?? PRIORITY_STYLES.medium!;
+  const assignedAgent = task.assignedAgentUuid ? agents.find((a) => a.agentUuid === task.assignedAgentUuid) : null;
+
+  return (
+    <div
+      className={`rounded-lg border-l-4 ${priority.border} bg-white border border-gray-200 p-3.5 shadow-sm transition-all ${
+        isDragging ? 'shadow-xl ring-2 ring-brand-300 opacity-90 rotate-2 scale-105' : 'hover:shadow-md'
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <h4 className="text-sm font-semibold text-gray-900 leading-snug">{task.title}</h4>
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold ${priority.badge}`}>
+          {priority.label}
+        </span>
+      </div>
+      {task.description && (
+        <p className="text-xs text-gray-500 mb-2 line-clamp-2 leading-relaxed">{task.description}</p>
+      )}
+      {task.tags.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {task.tags.map((tag) => (
+            <span key={tag} className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-500">{tag}</span>
+          ))}
+        </div>
+      )}
+      {assignedAgent && (
+        <div className="flex items-center gap-1.5 mt-2 pt-2 border-t border-gray-100">
+          <div className={`h-5 w-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white ${
+            assignedAgent.status === 'online' ? 'bg-emerald-500' : 'bg-gray-400'
+          }`}>
+            {assignedAgent.name.charAt(0).toUpperCase()}
+          </div>
+          <span className="text-xs text-gray-600">{assignedAgent.name}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SortableTaskCard({ task, agents }: { task: KanbanTask; agents: Agent[] }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.taskUuid });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+      <TaskCard task={task} agents={agents} />
+    </div>
+  );
+}
+
+// ─── Droppable Column ──────────────────────────────────────────────────────
+
+function KanbanColumn({ column, tasks, agents }: {
+  column: typeof COLUMNS[number];
+  tasks: KanbanTask[];
+  agents: Agent[];
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: column.key });
+
+  return (
+    <div className="flex-shrink-0 w-72 flex flex-col">
+      <div className={`flex items-center gap-2.5 px-3 py-2.5 mb-2 rounded-lg ${column.headerBg}`}>
+        <div className={`h-3 w-3 rounded-full ${column.color}`} />
+        <span className="text-sm font-bold text-gray-700">{column.label}</span>
+        <span className="ml-auto rounded-full bg-white/80 px-2.5 py-0.5 text-xs font-bold text-gray-500 shadow-sm">
+          {tasks.length}
+        </span>
+      </div>
+      <div
+        ref={setNodeRef}
+        className={`flex-1 space-y-2.5 min-h-[300px] rounded-xl p-2.5 transition-colors ${
+          isOver ? 'bg-brand-50 ring-2 ring-brand-200' : 'bg-gray-50/80'
+        }`}
+      >
+        <SortableContext items={tasks.map((t) => t.taskUuid)} strategy={verticalListSortingStrategy}>
+          {tasks.map((task) => (
+            <SortableTaskCard key={task.taskUuid} task={task} agents={agents} />
+          ))}
+        </SortableContext>
+        {tasks.length === 0 && (
+          <div className={`flex items-center justify-center h-24 rounded-lg border-2 border-dashed transition-colors ${
+            isOver ? 'border-brand-300 bg-brand-50/50' : 'border-gray-200'
+          }`}>
+            <span className="text-xs text-gray-400">{isOver ? 'Drop here' : 'No tasks'}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ─────────────────────────────────────────────────────────────
 
 export function KanbanPage() {
   const { teamUuid } = useParams<{ teamUuid: string }>();
@@ -36,6 +150,11 @@ export function KanbanPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', priority: 'medium', tags: '' });
   const [creating, setCreating] = useState(false);
+  const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
 
   const load = useCallback(async () => {
     if (!teamUuid) return;
@@ -56,9 +175,7 @@ export function KanbanPage() {
     }
   }, [teamUuid]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -82,22 +199,50 @@ export function KanbanPage() {
     }
   }
 
-  async function moveTask(taskUuid: string, newStatus: string) {
-    if (!teamUuid) return;
-    try {
-      await updateKanbanTaskStatus(teamUuid, taskUuid, newStatus);
-      setTasks((prev) => prev.map((t) => (t.taskUuid === taskUuid ? { ...t, status: newStatus } : t)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to move task');
+  function handleDragStart(event: DragStartEvent) {
+    const task = tasks.find((t) => t.taskUuid === event.active.id);
+    setActiveTask(task ?? null);
+  }
+
+  function handleDragOver(event: DragOverEvent) {
+    const { active, over } = event;
+    if (!over) return;
+    const activeId = active.id as string;
+    const overId = over.id as string;
+
+    // If dragging over a column (not another task)
+    const overColumn = COLUMNS.find((c) => c.key === overId);
+    if (overColumn) {
+      setTasks((prev) =>
+        prev.map((t) => (t.taskUuid === activeId ? { ...t, status: overColumn.key } : t)),
+      );
+      return;
+    }
+
+    // If dragging over another task, move to that task's column
+    const overTask = tasks.find((t) => t.taskUuid === overId);
+    if (overTask) {
+      setTasks((prev) =>
+        prev.map((t) => (t.taskUuid === activeId ? { ...t, status: overTask.status } : t)),
+      );
     }
   }
 
-  function getAgentName(agentUuid: string | null) {
-    if (!agentUuid) return null;
-    return agents.find((a) => a.agentUuid === agentUuid)?.name ?? 'Unknown';
-  }
+  async function handleDragEnd(event: DragEndEvent) {
+    setActiveTask(null);
+    const { active } = event;
+    const activeId = active.id as string;
+    const task = tasks.find((t) => t.taskUuid === activeId);
+    if (!task || !teamUuid) return;
 
-  const columnIdx = (status: string) => COLUMNS.findIndex((c) => c.key === status);
+    // Persist the status change to backend
+    try {
+      await updateKanbanTaskStatus(teamUuid, task.taskUuid, task.status);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to move task');
+      await load(); // revert on failure
+    }
+  }
 
   if (loading) {
     return (
@@ -105,7 +250,7 @@ export function KanbanPage() {
         <div className="animate-pulse h-8 w-48 rounded bg-gray-200" />
         <div className="flex gap-4">
           {COLUMNS.map((col) => (
-            <div key={col.key} className="animate-pulse flex-1 h-64 rounded-xl bg-gray-100" />
+            <div key={col.key} className="animate-pulse flex-1 h-80 rounded-xl bg-gray-100" />
           ))}
         </div>
       </div>
@@ -113,44 +258,42 @@ export function KanbanPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link to={`/teams/${teamUuid}`} className="text-gray-400 hover:text-gray-600 text-sm">&larr; {team?.name ?? 'Team'}</Link>
+          <div className="h-5 w-px bg-gray-200" />
           <h1 className="text-xl font-bold text-gray-900">Kanban Board</h1>
-          <span className="text-sm text-gray-400">{tasks.length} tasks</span>
+          <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">{tasks.length} tasks</span>
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 transition-colors"
+          className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-medium text-white hover:from-brand-600 hover:to-brand-700 shadow-sm transition-all"
         >
           {showCreate ? 'Cancel' : '+ New Task'}
         </button>
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 flex items-center justify-between">
+          {error}
+          <button onClick={() => setError('')} className="text-red-400 hover:text-red-600 ml-2">&times;</button>
+        </div>
       )}
 
       {showCreate && (
         <form onSubmit={handleCreate} className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm space-y-3">
-          <input
-            type="text"
-            required
-            value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
-            placeholder="Task title"
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-          />
-          <textarea
-            value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
-            placeholder="Description (optional)"
-            rows={2}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
-          />
           <div className="flex gap-3">
+            <input
+              type="text"
+              required
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              placeholder="Task title"
+              className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+              autoFocus
+            />
             <select
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
@@ -161,6 +304,15 @@ export function KanbanPage() {
               <option value="high">High</option>
               <option value="critical">Critical</option>
             </select>
+          </div>
+          <textarea
+            value={form.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            placeholder="Description (optional)"
+            rows={2}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none"
+          />
+          <div className="flex gap-3 items-center">
             <input
               type="text"
               value={form.tags}
@@ -171,84 +323,32 @@ export function KanbanPage() {
             <button
               type="submit"
               disabled={creating}
-              className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+              className="rounded-lg bg-brand-500 px-5 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50 shadow-sm"
             >
-              {creating ? 'Creating...' : 'Add Task'}
+              {creating ? 'Adding...' : 'Add Task'}
             </button>
           </div>
         </form>
       )}
 
-      {/* Board */}
-      <div className="flex gap-3 overflow-x-auto pb-4">
-        {COLUMNS.map((col) => {
-          const colTasks = tasks.filter((t) => t.status === col.key);
-          return (
-            <div key={col.key} className="flex-shrink-0 w-64 flex flex-col">
-              <div className="flex items-center gap-2 px-2 py-2 mb-2">
-                <div className={`h-2.5 w-2.5 rounded-full ${col.color}`} />
-                <span className="text-sm font-semibold text-gray-700">{col.label}</span>
-                <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500">
-                  {colTasks.length}
-                </span>
-              </div>
-              <div className="flex-1 space-y-2 min-h-[200px] rounded-xl bg-gray-50/80 p-2">
-                {colTasks.map((task) => (
-                  <div
-                    key={task.taskUuid}
-                    className={`rounded-lg border-l-4 ${PRIORITY_COLORS[task.priority] ?? 'border-l-gray-300'} bg-white border border-gray-200 p-3 shadow-sm hover:shadow-md transition-shadow`}
-                  >
-                    <h4 className="text-sm font-medium text-gray-900 mb-1">{task.title}</h4>
-                    {task.description && (
-                      <p className="text-xs text-gray-500 mb-2 line-clamp-2">{task.description}</p>
-                    )}
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {task.tags.map((tag) => (
-                        <span key={tag} className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">{tag}</span>
-                      ))}
-                    </div>
-                    {task.assignedAgentUuid && (
-                      <div className="text-xs text-brand-600 mb-2">
-                        Assigned: {getAgentName(task.assignedAgentUuid)}
-                      </div>
-                    )}
-                    {/* Move buttons */}
-                    <div className="flex gap-1 mt-1">
-                      {columnIdx(task.status) > 0 && (() => {
-                        const prevCol = COLUMNS[columnIdx(task.status) - 1]!;
-                        return (
-                          <button
-                            onClick={() => moveTask(task.taskUuid, prevCol.key)}
-                            className="rounded px-1.5 py-0.5 text-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                            title={`Move to ${prevCol.label}`}
-                          >
-                            &larr;
-                          </button>
-                        );
-                      })()}
-                      {columnIdx(task.status) < COLUMNS.length - 1 && (() => {
-                        const nextCol = COLUMNS[columnIdx(task.status) + 1]!;
-                        return (
-                          <button
-                            onClick={() => moveTask(task.taskUuid, nextCol.key)}
-                            className="rounded px-1.5 py-0.5 text-[10px] text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                            title={`Move to ${nextCol.label}`}
-                          >
-                            &rarr;
-                          </button>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                ))}
-                {colTasks.length === 0 && (
-                  <div className="flex items-center justify-center h-20 text-xs text-gray-400">No tasks</div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      {/* Board with DnD */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
+        <div className="flex gap-4 overflow-x-auto pb-6">
+          {COLUMNS.map((col) => {
+            const colTasks = tasks.filter((t) => t.status === col.key);
+            return <KanbanColumn key={col.key} column={col} tasks={colTasks} agents={agents} />;
+          })}
+        </div>
+        <DragOverlay>
+          {activeTask && <TaskCard task={activeTask} agents={agents} isDragging />}
+        </DragOverlay>
+      </DndContext>
     </div>
   );
 }
