@@ -4,6 +4,12 @@
  */
 import { ApiError } from '../../types/index.js';
 
+export interface StageRetryConfig {
+  maxRetries?: number;     // Default: 2
+  backoffMs?: number;      // Default: 1000 (exponential)
+  timeoutMs?: number;      // Per-call timeout. Default: from env MAOF_AGENT_CALL_TIMEOUT_MS
+}
+
 export interface StageDefinition {
   id: string;
   name: string;
@@ -11,6 +17,7 @@ export interface StageDefinition {
   input?: Record<string, unknown>;
   dependencies?: string[];
   config?: Record<string, unknown>;
+  retryConfig?: StageRetryConfig;
 }
 
 export interface WorkflowDefinition {

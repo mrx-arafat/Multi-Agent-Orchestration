@@ -19,6 +19,7 @@ import {
   listAgentsSchema,
   agentUuidParamSchema,
 } from './schemas.js';
+import { checkAgentHealth } from './health-checker.js';
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -94,6 +95,21 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
       const { agentUuid } = request.params as { agentUuid: string };
       await deleteAgent(app.db, agentUuid, request.user.sub);
       return reply.send({ success: true, data: { deleted: true } });
+    },
+  );
+
+  /**
+   * POST /agents/:agentUuid/health-check
+   * Triggers a manual health check for a specific agent.
+   * Returns the health check result with status transition.
+   */
+  app.post(
+    '/agents/:agentUuid/health-check',
+    { schema: agentUuidParamSchema, preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const { agentUuid } = request.params as { agentUuid: string };
+      const result = await checkAgentHealth(app.db, agentUuid);
+      return reply.send({ success: true, data: result });
     },
   );
 }

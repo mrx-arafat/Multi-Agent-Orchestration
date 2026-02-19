@@ -1,8 +1,7 @@
 /**
  * BullMQ workflow worker.
- * Processes workflow execution jobs sequentially through stages.
- * MVP: simulates agent work with 100ms delay + mock output.
- * Production: will dispatch to real agent endpoints.
+ * Processes workflow execution jobs by routing stages to real agents
+ * or using mock simulation based on MAOF_AGENT_DISPATCH_MODE.
  */
 import { Worker } from 'bullmq';
 import type { ConnectionOptions } from 'bullmq';
@@ -13,6 +12,13 @@ import { getExecutionOrder } from '../modules/workflows/validator.js';
 import type { WorkflowDefinition, StageDefinition } from '../modules/workflows/validator.js';
 import { WORKFLOW_QUEUE_NAME, type WorkflowJobData } from './workflow-queue.js';
 import { logStageExecution } from '../modules/audit/service.js';
+import { findAgentForCapability } from '../modules/agents/router.js';
+import { getAgentAuthToken } from '../modules/agents/service.js';
+import { callAgent, AgentCallError, type AgentRequest } from '../lib/agent-client.js';
+import { getConfig } from '../config/index.js';
+import type { Redis } from 'ioredis';
+import { incrementAgentTasks, decrementAgentTasks } from '../modules/agents/task-tracker.js';
+import { writeMemory } from '../modules/memory/service.js';
 
 /**
  * Resolves variable interpolation: ${stageId.output.field} or ${workflow.input.field}
@@ -51,45 +57,248 @@ function resolveVariables(
 }
 
 /**
- * Simulates an agent executing a stage (MVP placeholder).
- * Returns mock output based on the stage's capability.
+ * Mock agent execution (for development/testing).
  */
 async function simulateAgentExecution(
   stage: StageDefinition,
   resolvedInput: unknown,
-): Promise<Record<string, unknown>> {
-  // Short delay to simulate real agent work
+): Promise<{ output: Record<string, unknown>; agentId: string }> {
   await new Promise((resolve) => setTimeout(resolve, 50));
 
   return {
-    capability: stage.agentCapability,
-    stageId: stage.id,
-    processedAt: new Date().toISOString(),
-    input: resolvedInput,
-    result: `Mock output from ${stage.agentCapability}`,
-    status: 'success',
+    agentId: `mock-${stage.agentCapability}`,
+    output: {
+      capability: stage.agentCapability,
+      stageId: stage.id,
+      processedAt: new Date().toISOString(),
+      input: resolvedInput,
+      result: `Mock output from ${stage.agentCapability}`,
+      status: 'success',
+    },
   };
 }
 
 /**
+ * Real agent dispatch — routes to an actual agent via HTTP.
+ */
+async function dispatchToAgent(
+  db: Database,
+  stage: StageDefinition,
+  resolvedInput: Record<string, unknown>,
+  workflowRunId: string,
+  userUuid: string,
+  completedStageIds: string[],
+  timeoutMs: number,
+): Promise<{ output: Record<string, unknown>; agentId: string }> {
+  const agent = await findAgentForCapability(db, stage.agentCapability);
+
+  if (!agent) {
+    throw new AgentCallError(
+      `No online agent available with capability '${stage.agentCapability}'`,
+      'NO_AGENT_AVAILABLE',
+      false,
+      stage.agentCapability,
+    );
+  }
+
+  const authToken = await getAgentAuthToken(db, agent.agentUuid);
+
+  const request: AgentRequest = {
+    workflow_run_id: workflowRunId,
+    stage_id: stage.id,
+    capability_required: stage.agentCapability,
+    input: resolvedInput,
+    context: {
+      previous_stages: completedStageIds,
+      user_id: userUuid,
+      deadline_ms: timeoutMs,
+    },
+  };
+
+  const response = await callAgent(agent.endpoint, authToken, request, timeoutMs);
+
+  return {
+    agentId: agent.agentId,
+    output: response.output,
+  };
+}
+
+/**
+ * Sleeps for the given milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Executes a single stage — dispatches to real agent or mock based on config.
+ */
+async function executeStage(
+  db: Database,
+  stage: StageDefinition,
+  resolvedInput: Record<string, unknown>,
+  workflowRunId: string,
+  userUuid: string,
+  completedStageIds: string[],
+): Promise<{ output: Record<string, unknown>; agentId: string }> {
+  const config = getConfig();
+
+  if (config.MAOF_AGENT_DISPATCH_MODE === 'real') {
+    return dispatchToAgent(
+      db, stage, resolvedInput, workflowRunId, userUuid, completedStageIds,
+      config.MAOF_AGENT_CALL_TIMEOUT_MS,
+    );
+  }
+
+  return simulateAgentExecution(stage, resolvedInput);
+}
+
+/**
+ * Executes a stage with retry logic and fallback to alternate agents.
+ *
+ * Retry strategy:
+ * 1. Try the primary agent up to maxRetries times with exponential backoff.
+ * 2. If all retries exhausted and error was retryable, try a fallback agent (different agent same capability).
+ * 3. Fallback agent also gets full retry budget.
+ * 4. Fail only when all agents and retries are exhausted.
+ */
+export async function executeStageWithRetry(
+  db: Database,
+  stage: StageDefinition,
+  resolvedInput: Record<string, unknown>,
+  workflowRunId: string,
+  userUuid: string,
+  completedStageIds: string[],
+  redis?: Redis,
+): Promise<{ output: Record<string, unknown>; agentId: string; memoryWrites?: Record<string, unknown> }> {
+  const config = getConfig();
+
+  // Mock mode skips retry logic entirely
+  if (config.MAOF_AGENT_DISPATCH_MODE !== 'real') {
+    return simulateAgentExecution(stage, resolvedInput);
+  }
+
+  const maxRetries = stage.retryConfig?.maxRetries ?? 2;
+  const backoffMs = stage.retryConfig?.backoffMs ?? 1000;
+  const timeoutMs = stage.retryConfig?.timeoutMs ?? config.MAOF_AGENT_CALL_TIMEOUT_MS;
+  const failedAgentUuids: string[] = [];
+  let lastError: Error | null = null;
+
+  // Attempt with up to 2 different agents (primary + 1 fallback)
+  const maxAgentAttempts = 2;
+
+  for (let agentAttempt = 0; agentAttempt < maxAgentAttempts; agentAttempt++) {
+    const agent = await findAgentForCapability(db, stage.agentCapability, failedAgentUuids, redis);
+
+    if (!agent) {
+      // No more agents available for this capability
+      if (lastError) throw lastError;
+      throw new AgentCallError(
+        `No online agent available with capability '${stage.agentCapability}'`,
+        'NO_AGENT_AVAILABLE',
+        false,
+        stage.agentCapability,
+      );
+    }
+
+    // Track concurrent tasks in Redis
+    if (redis) await incrementAgentTasks(redis, agent.agentUuid);
+
+    const authToken = await getAgentAuthToken(db, agent.agentUuid);
+
+    try {
+      for (let retry = 0; retry <= maxRetries; retry++) {
+        try {
+          const request: AgentRequest = {
+            workflow_run_id: workflowRunId,
+            stage_id: stage.id,
+            capability_required: stage.agentCapability,
+            input: resolvedInput,
+            context: {
+              previous_stages: completedStageIds,
+              user_id: userUuid,
+              deadline_ms: timeoutMs,
+            },
+          };
+
+          const response = await callAgent(agent.endpoint, authToken, request, timeoutMs);
+          const result: { output: Record<string, unknown>; agentId: string; memoryWrites?: Record<string, unknown> } = {
+            agentId: agent.agentId,
+            output: response.output,
+          };
+          if (response.memory_writes) result.memoryWrites = response.memory_writes;
+          return result;
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          const isRetryable = err instanceof AgentCallError && err.retryable;
+
+          if (retry < maxRetries && isRetryable) {
+            // Log retry attempt
+            const delay = backoffMs * Math.pow(2, retry);
+            await logStageExecution(db, {
+              workflowRunId,
+              stageId: stage.id,
+              agentId: agent.agentId,
+              action: 'retry',
+              input: resolvedInput,
+              status: `retry_${retry + 1}_of_${maxRetries}`,
+            }).catch(() => {}); // Best-effort audit
+
+            await sleep(delay);
+            continue;
+          }
+
+          // Retries exhausted or non-retryable — try fallback agent
+          if (!isRetryable) {
+            // Non-retryable errors don't benefit from a fallback agent
+            throw lastError;
+          }
+
+          // Mark this agent as failed so fallback selects a different one
+          failedAgentUuids.push(agent.agentUuid);
+          break; // Break retry loop, continue agent loop
+        }
+      }
+    } finally {
+      // Always decrement task count when done with this agent
+      if (redis) await decrementAgentTasks(redis, agent.agentUuid).catch(() => {});
+    }
+  }
+
+  // All agents and retries exhausted
+  throw lastError ?? new AgentCallError(
+    `All agents exhausted for capability '${stage.agentCapability}'`,
+    'ALL_AGENTS_EXHAUSTED',
+    false,
+    stage.agentCapability,
+  );
+}
+
+/**
  * Creates and starts the BullMQ workflow worker.
- * Worker processes one workflow at a time in-process with the API server.
  */
 export function createWorkflowWorker(
   db: Database,
   connection: ConnectionOptions,
+  redis?: Redis,
 ): Worker<WorkflowJobData> {
   const worker = new Worker<WorkflowJobData>(
     WORKFLOW_QUEUE_NAME,
     async (job) => {
-      const { workflowRunId } = job.data;
+      const { workflowRunId, userUuid } = job.data;
 
-      // Fetch workflow run
-      const [run] = await db
-        .select()
-        .from(workflowRuns)
-        .where(eq(workflowRuns.workflowRunId, workflowRunId))
-        .limit(1);
+      // Fetch workflow run with retry — BullMQ may pick up the job before the INSERT
+      // is visible on all pool connections (connection pool visibility delay)
+      let run: typeof workflowRuns.$inferSelect | undefined;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        [run] = await db
+          .select()
+          .from(workflowRuns)
+          .where(eq(workflowRuns.workflowRunId, workflowRunId))
+          .limit(1);
+        if (run) break;
+        await sleep(200 * (attempt + 1));
+      }
 
       if (!run) {
         throw new Error(`Workflow run '${workflowRunId}' not found`);
@@ -104,13 +313,13 @@ export function createWorkflowWorker(
       const definition = run.workflowDefinition as unknown as WorkflowDefinition;
       const workflowInput = (run.input ?? {}) as Record<string, unknown>;
       const stageOutputs = new Map<string, unknown>();
+      const completedStageIds: string[] = [];
 
       // Execute stages in topological order
       const orderedStages = getExecutionOrder(definition.stages);
 
       for (const stage of orderedStages) {
-        // Resolve variable interpolation for this stage's input
-        const resolvedInput = resolveVariables(stage.input ?? {}, { workflowInput, stageOutputs });
+        const resolvedInput = resolveVariables(stage.input ?? {}, { workflowInput, stageOutputs }) as Record<string, unknown>;
 
         // Create stage execution record
         const [stageExec] = await db
@@ -118,9 +327,9 @@ export function createWorkflowWorker(
           .values({
             workflowRunId,
             stageId: stage.id,
-            agentId: stage.agentCapability, // Using capability as agentId for MVP
+            agentId: stage.agentCapability, // Updated after dispatch
             status: 'in_progress',
-            input: resolvedInput as Record<string, unknown>,
+            input: resolvedInput,
             startedAt: new Date(),
           })
           .returning();
@@ -130,25 +339,35 @@ export function createWorkflowWorker(
         const startTime = Date.now();
 
         try {
-          const output = await simulateAgentExecution(stage, resolvedInput);
+          const { output, agentId, memoryWrites } = await executeStageWithRetry(
+            db, stage, resolvedInput, workflowRunId, userUuid, completedStageIds, redis,
+          );
           const executionTimeMs = Date.now() - startTime;
 
-          // Update stage execution as completed
+          // Persist agent memory_writes to Redis (SRS FR-3.3)
+          if (memoryWrites && redis) {
+            for (const [key, value] of Object.entries(memoryWrites)) {
+              await writeMemory(redis, { workflowRunId, key, value }).catch(() => {});
+            }
+          }
+
+          // Update stage execution as completed with actual agent ID
           await db
             .update(stageExecutions)
             .set({
               status: 'completed',
               output,
+              agentId,
               completedAt: new Date(),
               executionTimeMs,
             })
             .where(eq(stageExecutions.id, stageExec.id));
 
-          // Audit log: successful execution
+          // Audit log
           await logStageExecution(db, {
             workflowRunId,
             stageId: stage.id,
-            agentId: stage.agentCapability,
+            agentId,
             action: 'execute',
             input: resolvedInput,
             output,
@@ -156,13 +375,19 @@ export function createWorkflowWorker(
           });
 
           stageOutputs.set(stage.id, output);
+          completedStageIds.push(stage.id);
         } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Stage execution failed';
+          const agentId = err instanceof AgentCallError ? err.agentId : stage.agentCapability;
+
           await db
             .update(stageExecutions)
             .set({
               status: 'failed',
-              errorMessage: err instanceof Error ? err.message : 'Stage execution failed',
+              agentId,
+              errorMessage,
               completedAt: new Date(),
+              executionTimeMs: Date.now() - startTime,
             })
             .where(eq(stageExecutions.id, stageExec.id));
 
@@ -170,11 +395,11 @@ export function createWorkflowWorker(
           await logStageExecution(db, {
             workflowRunId,
             stageId: stage.id,
-            agentId: stage.agentCapability,
+            agentId,
             action: 'fail',
             input: resolvedInput,
             status: 'failed',
-          }).catch(() => {}); // Best-effort audit log on failure
+          }).catch(() => {}); // Best-effort
 
           // Mark workflow as failed
           await db
@@ -182,7 +407,7 @@ export function createWorkflowWorker(
             .set({
               status: 'failed',
               completedAt: new Date(),
-              errorMessage: `Stage '${stage.id}' failed: ${err instanceof Error ? err.message : 'Unknown error'}`,
+              errorMessage: `Stage '${stage.id}' failed: ${errorMessage}`,
             })
             .where(eq(workflowRuns.workflowRunId, workflowRunId));
 
@@ -190,10 +415,7 @@ export function createWorkflowWorker(
         }
       }
 
-      // All stages completed — mark workflow as completed
-      const lastStage = orderedStages.at(-1);
-      const finalOutput = lastStage ? stageOutputs.get(lastStage.id) : undefined;
-
+      // All stages completed
       await db
         .update(workflowRuns)
         .set({
@@ -202,16 +424,16 @@ export function createWorkflowWorker(
         })
         .where(eq(workflowRuns.workflowRunId, workflowRunId));
 
-      return { finalOutput };
+      const lastStage = orderedStages.at(-1);
+      return { finalOutput: lastStage ? stageOutputs.get(lastStage.id) : undefined };
     },
     {
       connection,
-      concurrency: 1, // MVP: one workflow at a time to prevent duplicate execution
+      concurrency: 1,
     },
   );
 
   worker.on('failed', (job, err) => {
-    // Structured error for observability — workflow run ID is the job ID
     const meta = { jobId: job?.id, workflowRunId: job?.data?.workflowRunId };
     if (process.env['MAOF_NODE_ENV'] !== 'test') {
       console.error(JSON.stringify({ level: 'error', msg: 'Workflow job failed', err: err.message, ...meta }));

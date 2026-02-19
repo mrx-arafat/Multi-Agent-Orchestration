@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { Env } from '../../src/config/index.js';
 import { buildApp } from '../../src/app.js';
 import { _resetEnvCache } from '../../src/config/index.js';
 
@@ -6,8 +7,10 @@ import { _resetEnvCache } from '../../src/config/index.js';
  * Creates a fresh Fastify test instance.
  * Uses test-specific environment overrides to avoid port conflicts.
  * Does NOT start listening — uses inject() for HTTP simulation.
+ *
+ * @param overrides - Additional env overrides merged on top of test defaults
  */
-export async function createTestApp(): Promise<FastifyInstance> {
+export async function createTestApp(overrides?: Partial<Env>): Promise<FastifyInstance> {
   // Reset env cache so we can apply test overrides
   _resetEnvCache();
 
@@ -20,6 +23,7 @@ export async function createTestApp(): Promise<FastifyInstance> {
     MAOF_NODE_ENV: 'test',
     MAOF_LOG_LEVEL: 'silent',
     MAOF_DB_NAME: 'maof_test',
+    ...overrides,
   });
 
   // Ready the app (registers all plugins, routes) without binding to a port

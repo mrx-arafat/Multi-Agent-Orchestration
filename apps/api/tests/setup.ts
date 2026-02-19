@@ -58,7 +58,8 @@ async function setupTestDb(): Promise<void> {
 }
 
 async function flushBullMqQueue(): Promise<void> {
-  const { default: Redis } = await import('ioredis');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Redis = (await import('ioredis')).default as unknown as new (opts: Record<string, unknown>) => import('ioredis').default;
   const redis = new Redis({
     host: process.env['MAOF_REDIS_HOST'] ?? 'localhost',
     port: Number(process.env['MAOF_REDIS_PORT'] ?? 6379),

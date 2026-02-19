@@ -36,6 +36,22 @@ const envSchema = z.object({
 
   // CORS
   MAOF_CORS_ORIGINS: z.string().default('http://localhost:5173'),
+
+  // Agent dispatch
+  MAOF_AGENT_DISPATCH_MODE: z
+    .enum(['real', 'mock'])
+    .default('mock'),
+  // AES-256 key (64 hex chars = 32 bytes) for encrypting agent auth tokens at rest.
+  // Required when MAOF_AGENT_DISPATCH_MODE=real. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+  MAOF_AGENT_TOKEN_KEY: z
+    .string()
+    .length(64, { message: 'MAOF_AGENT_TOKEN_KEY must be exactly 64 hex characters (32 bytes)' })
+    .regex(/^[0-9a-f]+$/i, { message: 'MAOF_AGENT_TOKEN_KEY must be a hex string' })
+    .optional(),
+  // Default timeout for agent calls (ms)
+  MAOF_AGENT_CALL_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
+  // Agent health check interval (ms). Default: 300000 (5 minutes). Set to 0 to disable.
+  MAOF_HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().min(0).default(300000),
 });
 
 export type Env = z.infer<typeof envSchema>;

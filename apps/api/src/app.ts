@@ -11,6 +11,7 @@ import { agentRoutes } from './modules/agents/routes.js';
 import { queuePlugin } from './plugins/queue.js';
 import { workflowRoutes } from './modules/workflows/routes.js';
 import { auditRoutes } from './modules/audit/routes.js';
+import { memoryRoutes } from './modules/memory/routes.js';
 
 // Type augmentations are in the database plugin
 
@@ -88,6 +89,7 @@ export async function buildApp(envOverride?: Partial<Env>): Promise<FastifyInsta
   if (process.env['MAOF_SKIP_DB'] !== 'true') {
     await app.register(workflowRoutes);
     await app.register(auditRoutes);
+    await app.register(memoryRoutes);
   }
 
   return app;

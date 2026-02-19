@@ -26,7 +26,7 @@ export async function auditRoutes(app: FastifyInstance): Promise<void> {
     { schema: auditRouteSchema, preHandler: [app.authenticate] },
     async (request, reply) => {
       const { runId } = request.params as { runId: string };
-      const result = await getAuditTrail(app.db, runId, request.user.sub);
+      const result = await getAuditTrail(app.db, runId, request.user.sub, request.user.role);
       return reply.send({ success: true, data: result });
     },
   );

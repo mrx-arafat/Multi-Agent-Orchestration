@@ -17,6 +17,15 @@ const stageSchema = {
       default: [],
     },
     config: { type: 'object' },
+    retryConfig: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        maxRetries: { type: 'integer', minimum: 0, maximum: 10, default: 2 },
+        backoffMs: { type: 'integer', minimum: 100, maximum: 60000, default: 1000 },
+        timeoutMs: { type: 'integer', minimum: 1000, maximum: 300000 },
+      },
+    },
   },
 } as const;
 

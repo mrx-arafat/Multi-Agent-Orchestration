@@ -6,6 +6,8 @@ import { eq, and, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
 import { agents } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
+import { encrypt, decrypt } from '../../lib/crypto.js';
+import { getConfig } from '../../config/index.js';
 
 const BCRYPT_ROUNDS = 12;
 
@@ -69,6 +71,12 @@ export async function registerAgent(
 
   const authTokenHash = await bcrypt.hash(params.authToken, BCRYPT_ROUNDS);
 
+  // Encrypt the auth token for MAOF-to-agent calls (if encryption key is configured)
+  const config = getConfig();
+  const authTokenEncrypted = config.MAOF_AGENT_TOKEN_KEY
+    ? encrypt(params.authToken, config.MAOF_AGENT_TOKEN_KEY)
+    : null;
+
   try {
     const [created] = await db
       .insert(agents)
@@ -78,6 +86,7 @@ export async function registerAgent(
         description: params.description,
         endpoint: params.endpoint,
         authTokenHash,
+        authTokenEncrypted,
         capabilities: params.capabilities ?? [],
         maxConcurrentTasks: params.maxConcurrentTasks ?? 5,
         registeredByUserUuid: params.registeredByUserUuid,
@@ -156,6 +165,33 @@ export async function getAgentByUuid(db: Database, agentUuid: string): Promise<S
   }
 
   return toSafeAgent(agent);
+}
+
+/**
+ * Returns the decrypted auth token for an agent (used for MAOF-to-agent calls).
+ * Throws if the token is not available or encryption key is missing.
+ */
+export async function getAgentAuthToken(db: Database, agentUuid: string): Promise<string> {
+  const [agent] = await db
+    .select({ authTokenEncrypted: agents.authTokenEncrypted })
+    .from(agents)
+    .where(and(eq(agents.agentUuid, agentUuid), isNull(agents.deletedAt)))
+    .limit(1);
+
+  if (!agent) {
+    throw ApiError.notFound('Agent');
+  }
+
+  if (!agent.authTokenEncrypted) {
+    throw ApiError.internal('Agent auth token not available for dispatch (re-register agent)');
+  }
+
+  const config = getConfig();
+  if (!config.MAOF_AGENT_TOKEN_KEY) {
+    throw ApiError.internal('MAOF_AGENT_TOKEN_KEY not configured');
+  }
+
+  return decrypt(agent.authTokenEncrypted, config.MAOF_AGENT_TOKEN_KEY);
 }
 
 export async function deleteAgent(

@@ -23,7 +23,8 @@ export const agents = pgTable('agents', {
   // PostgreSQL text array for capability tags e.g. ["code-audit.javascript", "security-review"]
   capabilities: text('capabilities').array().notNull().default([]),
   endpoint: varchar('endpoint', { length: 2048 }).notNull(),
-  authTokenHash: varchar('auth_token_hash', { length: 255 }).notNull(), // Never store plaintext
+  authTokenHash: varchar('auth_token_hash', { length: 255 }).notNull(), // Bcrypt hash (for agent-to-MAOF verification)
+  authTokenEncrypted: text('auth_token_encrypted'), // AES-256-GCM encrypted (for MAOF-to-agent calls)
   maxConcurrentTasks: integer('max_concurrent_tasks').notNull().default(5),
   description: text('description'),
   status: agentStatusEnum('status').notNull().default('offline'),

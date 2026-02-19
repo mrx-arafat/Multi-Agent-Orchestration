@@ -20,6 +20,7 @@ export interface JwtPayload {
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    requireRole: (role: string) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   }
 }
 
@@ -58,5 +59,28 @@ export const authenticatePlugin = fp(async function (app: FastifyInstance): Prom
         error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
       });
     }
+  });
+
+  // Role-based access control preHandler factory
+  app.decorate('requireRole', function (role: string) {
+    return async function (request: FastifyRequest, reply: FastifyReply): Promise<void> {
+      // authenticate must run first to populate request.user
+      if (!request.user?.role) {
+        return reply.status(401).send({
+          success: false,
+          error: { code: 'UNAUTHORIZED', message: 'Authentication required' },
+        });
+      }
+
+      // Admin role bypasses all role checks
+      if (request.user.role === 'admin') return;
+
+      if (request.user.role !== role) {
+        return reply.status(403).send({
+          success: false,
+          error: { code: 'FORBIDDEN', message: `Requires '${role}' role` },
+        });
+      }
+    };
   });
 });

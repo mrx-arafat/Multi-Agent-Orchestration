@@ -111,6 +111,7 @@ export async function getWorkflowStatus(
   db: Database,
   workflowRunId: string,
   requestingUserUuid: string,
+  requestingUserRole = 'user',
 ): Promise<WorkflowRunSummary> {
   const [run] = await db
     .select()
@@ -122,7 +123,8 @@ export async function getWorkflowStatus(
     throw ApiError.notFound('Workflow run');
   }
 
-  if (run.userUuid !== requestingUserUuid) {
+  // Admin can access any workflow; regular users only their own
+  if (requestingUserRole !== 'admin' && run.userUuid !== requestingUserUuid) {
     throw ApiError.forbidden('Access denied');
   }
 
@@ -172,6 +174,7 @@ export async function getWorkflowResult(
   db: Database,
   workflowRunId: string,
   requestingUserUuid: string,
+  requestingUserRole = 'user',
 ): Promise<{ workflowRunId: string; output: unknown }> {
   const [run] = await db
     .select()
@@ -183,7 +186,8 @@ export async function getWorkflowResult(
     throw ApiError.notFound('Workflow run');
   }
 
-  if (run.userUuid !== requestingUserUuid) {
+  // Admin can access any workflow; regular users only their own
+  if (requestingUserRole !== 'admin' && run.userUuid !== requestingUserUuid) {
     throw ApiError.forbidden('Access denied');
   }
 

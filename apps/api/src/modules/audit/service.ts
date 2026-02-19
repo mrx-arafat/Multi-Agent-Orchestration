@@ -68,6 +68,7 @@ export async function getAuditTrail(
   db: Database,
   workflowRunId: string,
   requestingUserUuid: string,
+  requestingUserRole = 'user',
 ): Promise<{ workflowRunId: string; logs: typeof executionLogs.$inferSelect[] }> {
   // Verify workflow exists and belongs to requesting user
   const [run] = await db
@@ -80,7 +81,8 @@ export async function getAuditTrail(
     throw ApiError.notFound('Workflow run');
   }
 
-  if (run.userUuid !== requestingUserUuid) {
+  // Admin can access any audit trail; regular users only their own
+  if (requestingUserRole !== 'admin' && run.userUuid !== requestingUserUuid) {
     throw ApiError.forbidden('Access denied');
   }
 

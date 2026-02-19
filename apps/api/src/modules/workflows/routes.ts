@@ -74,7 +74,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     { schema: workflowRunIdParamSchema, preHandler: [app.authenticate] },
     async (request, reply) => {
       const { runId } = request.params as { runId: string };
-      const status = await getWorkflowStatus(app.db, runId, request.user.sub);
+      const status = await getWorkflowStatus(app.db, runId, request.user.sub, request.user.role);
       return reply.send({ success: true, data: status });
     },
   );
@@ -88,7 +88,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
     { schema: workflowRunIdParamSchema, preHandler: [app.authenticate] },
     async (request, reply) => {
       const { runId } = request.params as { runId: string };
-      const result = await getWorkflowResult(app.db, runId, request.user.sub);
+      const result = await getWorkflowResult(app.db, runId, request.user.sub, request.user.role);
       return reply.send({ success: true, data: result });
     },
   );
