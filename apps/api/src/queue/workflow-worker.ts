@@ -211,7 +211,15 @@ export function createWorkflowWorker(
   );
 
   worker.on('failed', (job, err) => {
-    console.error(`Workflow job ${job?.id} failed:`, err.message);
+    // Structured error for observability — workflow run ID is the job ID
+    const meta = { jobId: job?.id, workflowRunId: job?.data?.workflowRunId };
+    if (process.env['MAOF_NODE_ENV'] !== 'test') {
+      console.error(JSON.stringify({ level: 'error', msg: 'Workflow job failed', err: err.message, ...meta }));
+    }
+  });
+
+  worker.on('error', () => {
+    // BullMQ emits connection errors here — prevent unhandled crashes.
   });
 
   return worker;

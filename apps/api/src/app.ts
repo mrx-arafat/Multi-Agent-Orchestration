@@ -44,6 +44,20 @@ export async function buildApp(envOverride?: Partial<Env>): Promise<FastifyInsta
     },
   });
 
+  // Handle empty body with Content-Type: application/json (common client pattern).
+  // Without this, Fastify rejects DELETE/GET requests that include the header but no body.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    if (!body || (typeof body === 'string' && body.trim() === '')) {
+      done(null, undefined);
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
   // ── Plugins ─────────────────────────────────────────────────────────────
   await corsPlugin(app, config);
   await app.register(errorHandlerPlugin);

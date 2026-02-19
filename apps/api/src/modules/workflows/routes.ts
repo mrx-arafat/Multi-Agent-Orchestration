@@ -9,7 +9,7 @@
 import type { FastifyInstance } from 'fastify';
 import { validateWorkflowDefinition } from './validator.js';
 import { createWorkflowRun, listWorkflowRuns, getWorkflowStatus, getWorkflowResult } from './service.js';
-import { executeWorkflowSchema, workflowRunIdParamSchema } from './schemas.js';
+import { executeWorkflowSchema, workflowRunIdParamSchema, listWorkflowsSchema } from './schemas.js';
 import type { WorkflowDefinition } from './validator.js';
 
 export async function workflowRoutes(app: FastifyInstance): Promise<void> {
@@ -53,7 +53,7 @@ export async function workflowRoutes(app: FastifyInstance): Promise<void> {
    */
   app.get(
     '/workflows',
-    { preHandler: [app.authenticate] },
+    { schema: listWorkflowsSchema, preHandler: [app.authenticate] },
     async (request, reply) => {
       const query = request.query as {
         status?: string;

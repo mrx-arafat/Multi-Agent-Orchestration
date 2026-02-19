@@ -7,6 +7,7 @@ import {
   jsonb,
   pgEnum,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const workflowStatusEnum = pgEnum('workflow_status', [
@@ -32,7 +33,10 @@ export const workflowRuns = pgTable('workflow_runs', {
   startedAt: timestamp('started_at'),
   completedAt: timestamp('completed_at'),
   errorMessage: text('error_message'),
-});
+}, (table) => [
+  index('idx_workflow_runs_user_uuid').on(table.userUuid),
+  index('idx_workflow_runs_status').on(table.status),
+]);
 
 export type WorkflowRun = typeof workflowRuns.$inferSelect;
 export type NewWorkflowRun = typeof workflowRuns.$inferInsert;

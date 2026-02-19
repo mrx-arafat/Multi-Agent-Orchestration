@@ -15,6 +15,13 @@
       "when": 1771430116132,
       "tag": "0001_lean_romulus",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771479323661,
+      "tag": "0002_soft_firebird",
+      "breakpoints": true
     }
   ]
 }
