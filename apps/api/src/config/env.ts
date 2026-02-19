@@ -52,6 +52,11 @@ const envSchema = z.object({
   MAOF_AGENT_CALL_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
   // Agent health check interval (ms). Default: 300000 (5 minutes). Set to 0 to disable.
   MAOF_HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().min(0).default(300000),
+
+  // Audit signing — RSA PEM keys for cryptographic audit log signatures (FR-5.2).
+  // Optional: auto-generates in dev/test if missing.
+  MAOF_AUDIT_SIGNING_KEY: z.string().optional(),
+  MAOF_AUDIT_SIGNING_PUBLIC_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
