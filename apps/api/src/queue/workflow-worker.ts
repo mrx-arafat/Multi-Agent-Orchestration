@@ -19,6 +19,7 @@ import { getConfig } from '../config/index.js';
 import type { Redis } from 'ioredis';
 import { incrementAgentTasks, decrementAgentTasks } from '../modules/agents/task-tracker.js';
 import { writeMemory } from '../modules/memory/service.js';
+import { cacheStageOutput } from '../lib/cache.js';
 
 /**
  * Resolves variable interpolation: ${stageId.output.field} or ${workflow.input.field}
@@ -373,6 +374,11 @@ export function createWorkflowWorker(
             output,
             status: 'completed',
           });
+
+          // Cache stage output in Redis for fast context lookups (Phase 2)
+          if (redis) {
+            await cacheStageOutput(redis, workflowRunId, stage.id, output).catch(() => {});
+          }
 
           stageOutputs.set(stage.id, output);
           completedStageIds.push(stage.id);

@@ -12,6 +12,9 @@ import { queuePlugin } from './plugins/queue.js';
 import { workflowRoutes } from './modules/workflows/routes.js';
 import { auditRoutes } from './modules/audit/routes.js';
 import { memoryRoutes } from './modules/memory/routes.js';
+import { teamRoutes } from './modules/teams/routes.js';
+import { kanbanRoutes } from './modules/kanban/routes.js';
+import { messagingRoutes } from './modules/messaging/routes.js';
 
 // Type augmentations are in the database plugin
 
@@ -90,6 +93,9 @@ export async function buildApp(envOverride?: Partial<Env>): Promise<FastifyInsta
     await app.register(workflowRoutes);
     await app.register(auditRoutes);
     await app.register(memoryRoutes);
+    await app.register(teamRoutes);
+    await app.register(kanbanRoutes);
+    await app.register(messagingRoutes);
   }
 
   return app;

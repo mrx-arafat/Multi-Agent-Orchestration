@@ -4,7 +4,7 @@
 import bcrypt from 'bcryptjs';
 import { eq, and, isNull, sql } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
-import { agents } from '../../db/schema/index.js';
+import { agents, teams, teamMembers } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
 import { encrypt, decrypt } from '../../lib/crypto.js';
 import { getConfig } from '../../config/index.js';
@@ -20,6 +20,8 @@ export interface SafeAgent {
   endpoint: string;
   capabilities: string[];
   maxConcurrentTasks: number;
+  agentType: string;
+  teamUuid: string | null;
   status: string;
   registeredByUserUuid: string | null;
   lastHealthCheck: Date | null;
@@ -37,12 +39,20 @@ function toSafeAgent(agent: typeof agents.$inferSelect): SafeAgent {
     endpoint: agent.endpoint,
     capabilities: agent.capabilities,
     maxConcurrentTasks: agent.maxConcurrentTasks,
+    agentType: agent.agentType,
+    teamUuid: agent.teamUuid ?? null,
     status: agent.status,
     registeredByUserUuid: agent.registeredByUserUuid ?? null,
     lastHealthCheck: agent.lastHealthCheck ?? null,
     createdAt: agent.createdAt,
     updatedAt: agent.updatedAt,
   };
+}
+
+export interface RegisterAgentResult {
+  agent: SafeAgent;
+  /** If a team was auto-created, contains the team details */
+  team?: { teamUuid: string; name: string };
 }
 
 export async function registerAgent(
@@ -55,9 +65,15 @@ export async function registerAgent(
     authToken: string;
     capabilities?: string[];
     maxConcurrentTasks?: number;
+    agentType?: string;
+    teamUuid?: string;
+    /** Auto-create a team for this agent. The registering user becomes team owner. */
+    createTeam?: boolean;
+    /** Custom team name (used when createTeam is true) */
+    teamName?: string;
     registeredByUserUuid: string;
   },
-): Promise<SafeAgent> {
+): Promise<RegisterAgentResult> {
   // Check duplicate agentId
   const existing = await db
     .select({ id: agents.id })
@@ -77,6 +93,35 @@ export async function registerAgent(
     ? encrypt(params.authToken, config.MAOF_AGENT_TOKEN_KEY)
     : null;
 
+  // Auto-create team if requested
+  let teamUuid = params.teamUuid;
+  let createdTeam: { teamUuid: string; name: string } | undefined;
+
+  if (params.createTeam && !teamUuid) {
+    const teamName = params.teamName ?? `${params.name}'s Team`;
+    const [team] = await db
+      .insert(teams)
+      .values({
+        name: teamName,
+        description: `Auto-created team for agent ${params.name}`,
+        ownerUserUuid: params.registeredByUserUuid,
+        maxAgents: 10,
+      })
+      .returning();
+
+    if (!team) throw ApiError.internal('Failed to create team for agent');
+
+    // Add owner as team member
+    await db.insert(teamMembers).values({
+      teamUuid: team.teamUuid,
+      userUuid: params.registeredByUserUuid,
+      role: 'owner',
+    });
+
+    teamUuid = team.teamUuid;
+    createdTeam = { teamUuid: team.teamUuid, name: team.name };
+  }
+
   try {
     const [created] = await db
       .insert(agents)
@@ -89,13 +134,19 @@ export async function registerAgent(
         authTokenEncrypted,
         capabilities: params.capabilities ?? [],
         maxConcurrentTasks: params.maxConcurrentTasks ?? 5,
+        agentType: (params.agentType ?? 'generic') as 'generic' | 'openclaw',
+        teamUuid,
         registeredByUserUuid: params.registeredByUserUuid,
         status: 'offline',
       })
       .returning();
 
     if (!created) throw ApiError.internal('Failed to create agent');
-    return toSafeAgent(created);
+
+    return {
+      agent: toSafeAgent(created),
+      ...(createdTeam ? { team: createdTeam } : {}),
+    };
   } catch (err) {
     // PostgreSQL unique constraint violation (23505) — concurrent duplicate insert
     if (err instanceof Error && 'code' in err && (err as { code: string }).code === '23505') {

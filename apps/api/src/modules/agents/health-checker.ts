@@ -8,8 +8,10 @@
  * - Marks agents as online/degraded/offline based on response
  */
 import { eq, and, isNull } from 'drizzle-orm';
+import type { Redis } from 'ioredis';
 import type { Database } from '../../db/index.js';
 import { agents } from '../../db/schema/index.js';
+import { invalidateAgentCapabilityCache } from '../../lib/cache.js';
 
 export type AgentHealthStatus = 'online' | 'degraded' | 'offline';
 
@@ -116,6 +118,7 @@ export async function checkAgentHealth(
 export async function checkAllAgentsHealth(
   db: Database,
   timeoutMs = 10000,
+  redis?: Redis,
 ): Promise<HealthCheckResult[]> {
   const allAgents = await db
     .select({ agentUuid: agents.agentUuid })
@@ -134,6 +137,12 @@ export async function checkAllAgentsHealth(
       batch.map((a) => checkAgentHealth(db, a.agentUuid, timeoutMs)),
     );
     results.push(...batchResults);
+  }
+
+  // Invalidate agent capability cache if any status changed (Phase 2)
+  const hasStatusChange = results.some((r) => r.previousStatus !== r.newStatus);
+  if (hasStatusChange && redis) {
+    await invalidateAgentCapabilityCache(redis).catch(() => {});
   }
 
   return results;

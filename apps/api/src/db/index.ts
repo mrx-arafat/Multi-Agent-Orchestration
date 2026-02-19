@@ -56,4 +56,11 @@ export async function closePool(): Promise<void> {
   }
 }
 
+/**
+ * Returns true if the singleton pool is alive (not closed).
+ */
+export function isPoolAlive(): boolean {
+  return _pool !== null;
+}
+
 export { schema };

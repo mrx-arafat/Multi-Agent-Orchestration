@@ -43,7 +43,7 @@ beforeAll(async () => {
   app = await createTestApp();
   pool = createTestPool();
   await pool.query(`
-    TRUNCATE TABLE execution_logs, stage_executions, workflow_runs, agents, users
+    TRUNCATE TABLE agent_messages, kanban_tasks, team_members, teams, execution_logs, stage_executions, workflow_runs, agents, api_tokens, users
     RESTART IDENTITY CASCADE
   `);
 
@@ -57,7 +57,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pool.query(`
-    TRUNCATE TABLE execution_logs, stage_executions, workflow_runs, agents, users
+    TRUNCATE TABLE agent_messages, kanban_tasks, team_members, teams, execution_logs, stage_executions, workflow_runs, agents, api_tokens, users
     RESTART IDENTITY CASCADE
   `);
   await pool.end();
@@ -66,7 +66,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query(`
-    TRUNCATE TABLE execution_logs, stage_executions, workflow_runs, agents
+    TRUNCATE TABLE agent_messages, kanban_tasks, team_members, teams, execution_logs, stage_executions, workflow_runs, agents
     RESTART IDENTITY CASCADE
   `);
 });

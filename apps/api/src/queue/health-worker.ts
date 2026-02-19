@@ -5,6 +5,7 @@
  */
 import { Queue, Worker } from 'bullmq';
 import type { ConnectionOptions } from 'bullmq';
+import type { Redis } from 'ioredis';
 import type { Database } from '../db/index.js';
 import { checkAllAgentsHealth } from '../modules/agents/health-checker.js';
 
@@ -55,11 +56,12 @@ export async function scheduleHealthChecks(
 export function createHealthWorker(
   db: Database,
   connection: ConnectionOptions,
+  redis?: Redis,
 ): Worker {
   const worker = new Worker(
     HEALTH_QUEUE_NAME,
     async () => {
-      const results = await checkAllAgentsHealth(db);
+      const results = await checkAllAgentsHealth(db, 10000, redis);
 
       const statusChanges = results.filter((r) => r.previousStatus !== r.newStatus);
 

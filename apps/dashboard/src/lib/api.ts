@@ -192,3 +192,215 @@ export async function listWorkflows(params?: {
 export async function getWorkflowStatus(runId: string): Promise<WorkflowRun> {
   return request<WorkflowRun>(`/workflows/${runId}`);
 }
+
+// ── Teams ───────────────────────────────────────────────────────────────────
+
+export interface Team {
+  teamUuid: string;
+  name: string;
+  description: string | null;
+  ownerUserUuid: string;
+  maxAgents: number;
+  agentCount?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listTeams(): Promise<Team[]> {
+  return request<Team[]>('/teams');
+}
+
+export async function getTeam(teamUuid: string): Promise<Team> {
+  return request<Team>(`/teams/${teamUuid}`);
+}
+
+export async function createTeam(params: {
+  name: string;
+  description?: string;
+  maxAgents?: number;
+}): Promise<Team> {
+  return request<Team>('/teams', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function addAgentToTeam(teamUuid: string, agentUuid: string): Promise<void> {
+  await request<{ added: boolean }>(`/teams/${teamUuid}/agents`, {
+    method: 'POST',
+    body: JSON.stringify({ agentUuid }),
+  });
+}
+
+export async function removeAgentFromTeam(teamUuid: string, agentUuid: string): Promise<void> {
+  await request<{ removed: boolean }>(`/teams/${teamUuid}/agents/${agentUuid}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listTeamAgents(teamUuid: string): Promise<Agent[]> {
+  return request<Agent[]>(`/teams/${teamUuid}/agents`);
+}
+
+export async function addTeamMember(
+  teamUuid: string,
+  userUuid: string,
+  role: string = 'member',
+): Promise<void> {
+  await request<{ added: boolean }>(`/teams/${teamUuid}/members`, {
+    method: 'POST',
+    body: JSON.stringify({ userUuid, role }),
+  });
+}
+
+// ── Kanban ──────────────────────────────────────────────────────────────────
+
+export interface KanbanTask {
+  taskUuid: string;
+  teamUuid: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  tags: string[];
+  assignedAgentUuid: string | null;
+  createdByUserUuid: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KanbanSummary {
+  columns: { status: string; count: number }[];
+  total: number;
+}
+
+export async function listKanbanTasks(
+  teamUuid: string,
+  params?: { status?: string; assignedAgentUuid?: string; priority?: string; page?: number; limit?: number },
+): Promise<{ tasks: KanbanTask[]; meta: { total: number; page: number; limit: number; pages: number } }> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.assignedAgentUuid) query.set('assignedAgentUuid', params.assignedAgentUuid);
+  if (params?.priority) query.set('priority', params.priority);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  return request(`/teams/${teamUuid}/kanban/tasks${qs ? `?${qs}` : ''}`);
+}
+
+export async function createKanbanTask(
+  teamUuid: string,
+  params: { title: string; description?: string; priority?: string; tags?: string[]; assignedAgentUuid?: string },
+): Promise<KanbanTask> {
+  return request<KanbanTask>(`/teams/${teamUuid}/kanban/tasks`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function claimKanbanTask(teamUuid: string, taskUuid: string, agentUuid: string): Promise<KanbanTask> {
+  return request<KanbanTask>(`/teams/${teamUuid}/kanban/tasks/${taskUuid}/claim`, {
+    method: 'POST',
+    body: JSON.stringify({ agentUuid }),
+  });
+}
+
+export async function updateKanbanTaskStatus(
+  teamUuid: string,
+  taskUuid: string,
+  status: string,
+): Promise<KanbanTask> {
+  return request<KanbanTask>(`/teams/${teamUuid}/kanban/tasks/${taskUuid}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function getKanbanSummary(teamUuid: string): Promise<KanbanSummary> {
+  return request<KanbanSummary>(`/teams/${teamUuid}/kanban/summary`);
+}
+
+// ── Messaging ──────────────────────────────────────────────────────────────
+
+export interface Message {
+  messageUuid: string;
+  teamUuid: string;
+  fromAgentUuid: string;
+  toAgentUuid: string | null;
+  messageType: string;
+  subject: string | null;
+  content: string;
+  metadata: unknown;
+  readAt: string | null;
+  createdAt: string;
+}
+
+export async function sendMessage(
+  teamUuid: string,
+  params: { fromAgentUuid: string; toAgentUuid?: string; messageType?: string; subject?: string; content: string },
+): Promise<Message> {
+  return request<Message>(`/teams/${teamUuid}/messages`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function listTeamMessages(
+  teamUuid: string,
+  params?: { page?: number; limit?: number },
+): Promise<{ messages: Message[]; meta: { total: number; page: number; limit: number; pages: number } }> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  return request(`/teams/${teamUuid}/messages${qs ? `?${qs}` : ''}`);
+}
+
+export async function listAgentInbox(
+  teamUuid: string,
+  agentUuid: string,
+  params?: { page?: number; limit?: number },
+): Promise<{ messages: Message[]; meta: { total: number; page: number; limit: number; pages: number } }> {
+  const query = new URLSearchParams();
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.limit) query.set('limit', String(params.limit));
+  const qs = query.toString();
+  return request(`/teams/${teamUuid}/messages/inbox/${agentUuid}${qs ? `?${qs}` : ''}`);
+}
+
+export async function markMessageRead(teamUuid: string, messageUuid: string): Promise<void> {
+  await request(`/teams/${teamUuid}/messages/${messageUuid}/read`, { method: 'PATCH' });
+}
+
+// ── Agent Registration ─────────────────────────────────────────────────────
+
+export async function registerAgent(params: {
+  agentId: string;
+  name: string;
+  description?: string;
+  endpoint: string;
+  authToken: string;
+  capabilities?: string[];
+  maxConcurrentTasks?: number;
+  agentType?: string;
+  createTeam?: boolean;
+  teamName?: string;
+  teamUuid?: string;
+}): Promise<{ agent: Agent; team?: { teamUuid: string; name: string } }> {
+  return request('/agents/register', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function deleteAgent(agentUuid: string): Promise<void> {
+  await request(`/agents/${agentUuid}`, { method: 'DELETE' });
+}
+
+export async function getAgent(agentUuid: string): Promise<Agent> {
+  return request<Agent>(`/agents/${agentUuid}`);
+}
+
+export async function triggerHealthCheck(agentUuid: string): Promise<{ status: string; latencyMs: number }> {
+  return request(`/agents/${agentUuid}/health-check`, { method: 'POST' });
+}

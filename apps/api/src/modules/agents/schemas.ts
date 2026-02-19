@@ -19,6 +19,10 @@ export const registerAgentSchema = {
         default: [],
       },
       maxConcurrentTasks: { type: 'integer', minimum: 1, maximum: 100, default: 5 },
+      agentType: { type: 'string', enum: ['generic', 'openclaw'], default: 'generic' },
+      teamUuid: { type: 'string', format: 'uuid' },
+      createTeam: { type: 'boolean', default: false },
+      teamName: { type: 'string', minLength: 1, maxLength: 255 },
     },
   },
 } as const;

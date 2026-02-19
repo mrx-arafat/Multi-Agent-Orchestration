@@ -52,7 +52,7 @@ export const queuePlugin = fp(async function (app: FastifyInstance): Promise<voi
 
   if (healthIntervalMs > 0) {
     const healthQueue = initHealthQueue(connection);
-    healthWorker = createHealthWorker(app.db, connection);
+    healthWorker = createHealthWorker(app.db, connection, app.redis);
     await scheduleHealthChecks(healthQueue, healthIntervalMs);
     app.log.info({ intervalMs: healthIntervalMs }, 'Agent health check scheduler started');
   }

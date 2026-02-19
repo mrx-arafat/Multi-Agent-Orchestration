@@ -72,11 +72,15 @@ export const databasePlugin = fp(async function (app: FastifyInstance): Promise<
   app.decorate('pool', pool);
   app.decorate('redis', redis);
 
-  // Graceful shutdown
+  // Graceful shutdown — close Redis (per-instance) and pool (singleton, safe to call multiple times)
   app.addHook('onClose', async () => {
-    app.log.info('Closing database connections...');
-    await closePool();
-    await redis.quit();
-    app.log.info('Database connections closed');
+    app.log.info('Closing connections...');
+    await redis.quit().catch(() => {});
+    // Only close the pool if this is the last app (production).
+    // In tests, multiple app instances share the singleton pool.
+    if (process.env['MAOF_NODE_ENV'] !== 'test') {
+      await closePool();
+    }
+    app.log.info('Connections closed');
   });
 });

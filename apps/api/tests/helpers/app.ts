@@ -32,8 +32,18 @@ export async function createTestApp(overrides?: Partial<Env>): Promise<FastifyIn
 }
 
 /**
- * Closes the Fastify instance and releases all resources (DB pool, Redis).
+ * Closes the Fastify instance and releases Redis connections.
+ * The DB pool is a singleton shared across test app instances
+ * and is NOT closed here — it persists until the process exits.
  */
 export async function destroyTestApp(app: FastifyInstance): Promise<void> {
   await app.close();
+}
+
+/**
+ * Closes the singleton DB pool. Call this only in the final afterAll.
+ */
+export async function closeTestPool(): Promise<void> {
+  const { closePool } = await import('../../src/db/index.js');
+  await closePool();
 }

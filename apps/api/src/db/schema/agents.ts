@@ -10,6 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 export const agentStatusEnum = pgEnum('agent_status', ['online', 'degraded', 'offline']);
+export const agentTypeEnum = pgEnum('agent_type', ['generic', 'openclaw']);
 
 /**
  * Agents table — from SRS Section 6.1
@@ -27,6 +28,8 @@ export const agents = pgTable('agents', {
   authTokenEncrypted: text('auth_token_encrypted'), // AES-256-GCM encrypted (for MAOF-to-agent calls)
   maxConcurrentTasks: integer('max_concurrent_tasks').notNull().default(5),
   description: text('description'),
+  agentType: agentTypeEnum('agent_type').notNull().default('generic'), // 'generic' or 'openclaw'
+  teamUuid: uuid('team_uuid'), // Team this agent belongs to (null = unassigned)
   status: agentStatusEnum('status').notNull().default('offline'),
   lastHealthCheck: timestamp('last_health_check'),
   // Which user registered this agent (for ownership checks)

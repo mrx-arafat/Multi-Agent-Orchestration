@@ -20,6 +20,7 @@ import {
   agentUuidParamSchema,
 } from './schemas.js';
 import { checkAgentHealth } from './health-checker.js';
+import { getAgentActivity } from './activity-service.js';
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -39,14 +40,18 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
         authToken: string;
         capabilities?: string[];
         maxConcurrentTasks?: number;
+        agentType?: string;
+        teamUuid?: string;
+        createTeam?: boolean;
+        teamName?: string;
       };
 
-      const agent = await registerAgent(app.db, {
+      const result = await registerAgent(app.db, {
         ...body,
         registeredByUserUuid: request.user.sub,
       });
 
-      return reply.status(201).send({ success: true, data: agent });
+      return reply.status(201).send({ success: true, data: result.agent, team: result.team });
     },
   );
 
@@ -109,6 +114,51 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentUuid } = request.params as { agentUuid: string };
       const result = await checkAgentHealth(app.db, agentUuid);
+      return reply.send({ success: true, data: result });
+    },
+  );
+
+  /**
+   * GET /agents/:agentUuid/activity
+   * Returns the agent's execution history (SRS FR-5.3).
+   * Query: ?status=completed&dateStart=2026-01-01&dateEnd=2026-12-31&page=1&limit=20
+   */
+  app.get(
+    '/agents/:agentUuid/activity',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['agentUuid'],
+          properties: {
+            agentUuid: { type: 'string', format: 'uuid' },
+          },
+        },
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            status: { type: 'string', enum: ['queued', 'in_progress', 'completed', 'failed'] },
+            dateStart: { type: 'string', format: 'date' },
+            dateEnd: { type: 'string', format: 'date' },
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { agentUuid } = request.params as { agentUuid: string };
+      const query = request.query as {
+        status?: string;
+        dateStart?: string;
+        dateEnd?: string;
+        page?: number;
+        limit?: number;
+      };
+
+      const result = await getAgentActivity(app.db, agentUuid, query);
       return reply.send({ success: true, data: result });
     },
   );

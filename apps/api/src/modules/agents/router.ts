@@ -12,6 +12,10 @@ import type { Redis } from 'ioredis';
 import type { Database } from '../../db/index.js';
 import { agents } from '../../db/schema/index.js';
 import { getAgentTaskCounts } from './task-tracker.js';
+import {
+  getCachedAgentsForCapability,
+  cacheAgentsForCapability,
+} from '../../lib/cache.js';
 
 export interface RoutedAgent {
   agentUuid: string;
@@ -19,6 +23,37 @@ export interface RoutedAgent {
   name: string;
   endpoint: string;
   maxConcurrentTasks: number;
+}
+
+/** Queries the DB for online agents with a given capability. */
+async function queryAgentCandidates(
+  db: Database,
+  capability: string,
+  excludeAgentUuids: string[],
+): Promise<RoutedAgent[]> {
+  const conditions = [
+    isNull(agents.deletedAt),
+    eq(agents.status, 'online'),
+    sql`${agents.capabilities} @> ARRAY[${capability}]::text[]`,
+  ];
+
+  if (excludeAgentUuids.length > 0) {
+    for (const uuid of excludeAgentUuids) {
+      conditions.push(sql`${agents.agentUuid} != ${uuid}`);
+    }
+  }
+
+  return db
+    .select({
+      agentUuid: agents.agentUuid,
+      agentId: agents.agentId,
+      name: agents.name,
+      endpoint: agents.endpoint,
+      maxConcurrentTasks: agents.maxConcurrentTasks,
+    })
+    .from(agents)
+    .where(and(...conditions))
+    .orderBy(sql`${agents.maxConcurrentTasks} DESC`);
 }
 
 /**
@@ -34,30 +69,24 @@ export async function findAgentForCapability(
   excludeAgentUuids: string[] = [],
   redis?: Redis,
 ): Promise<RoutedAgent | null> {
-  const conditions = [
-    isNull(agents.deletedAt),
-    eq(agents.status, 'online'),
-    sql`${agents.capabilities} @> ARRAY[${capability}]::text[]`,
-  ];
+  // Try Redis capability cache first (Phase 2: reduce DB load)
+  let candidates: RoutedAgent[];
+  let usedCache = false;
 
-  // Exclude agents that already failed for this stage (fallback support)
-  if (excludeAgentUuids.length > 0) {
-    for (const uuid of excludeAgentUuids) {
-      conditions.push(sql`${agents.agentUuid} != ${uuid}`);
+  if (redis && excludeAgentUuids.length === 0) {
+    const cached = await getCachedAgentsForCapability(redis, capability).catch(() => null);
+    if (cached && cached.length > 0) {
+      candidates = cached;
+      usedCache = true;
+    } else {
+      candidates = await queryAgentCandidates(db, capability, excludeAgentUuids);
+      if (candidates.length > 0) {
+        await cacheAgentsForCapability(redis, capability, candidates).catch(() => {});
+      }
     }
+  } else {
+    candidates = await queryAgentCandidates(db, capability, excludeAgentUuids);
   }
-
-  const candidates = await db
-    .select({
-      agentUuid: agents.agentUuid,
-      agentId: agents.agentId,
-      name: agents.name,
-      endpoint: agents.endpoint,
-      maxConcurrentTasks: agents.maxConcurrentTasks,
-    })
-    .from(agents)
-    .where(and(...conditions))
-    .orderBy(sql`${agents.maxConcurrentTasks} DESC`);
 
   if (candidates.length === 0) return null;
 

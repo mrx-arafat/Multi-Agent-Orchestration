@@ -11,6 +11,7 @@ import { registerUser, validateCredentials, getUserByUuid } from './service.js';
 import { registerSchema, loginSchema, refreshSchema } from './schemas.js';
 import type { JwtPayload } from '../../plugins/authenticate.js';
 import { ApiError } from '../../types/index.js';
+import { createApiToken, listApiTokens, revokeApiToken } from './api-token-service.js';
 
 export async function authRoutes(app: FastifyInstance): Promise<void> {
   const config = getConfig();
@@ -115,4 +116,89 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = await getUserByUuid(app.db, request.user.sub);
     return reply.send({ success: true, data: user });
   });
+
+  // ── API Token Management (Phase 2) ────────────────────────────────────
+
+  /**
+   * POST /auth/api-tokens
+   * Body: { name, scopes?, expiresInDays? }
+   * Returns 201 + { token (plaintext, shown once), metadata }
+   */
+  app.post(
+    '/auth/api-tokens',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name'],
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 255 },
+            scopes: { type: 'array', items: { type: 'string' }, default: [] },
+            expiresInDays: { type: 'integer', minimum: 1, maximum: 365 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { name, scopes, expiresInDays } = request.body as {
+        name: string;
+        scopes?: string[];
+        expiresInDays?: number;
+      };
+
+      let expiresAt: Date | undefined;
+      if (expiresInDays) {
+        expiresAt = new Date(Date.now() + expiresInDays * 86400000);
+      }
+
+      const result = await createApiToken(app.db, {
+        userUuid: request.user.sub,
+        name,
+        ...(scopes ? { scopes } : {}),
+        ...(expiresAt ? { expiresAt } : {}),
+      });
+
+      return reply.status(201).send({ success: true, data: result });
+    },
+  );
+
+  /**
+   * GET /auth/api-tokens
+   * Returns all API tokens for the authenticated user (no plaintext).
+   */
+  app.get(
+    '/auth/api-tokens',
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const tokens = await listApiTokens(app.db, request.user.sub);
+      return reply.send({ success: true, data: tokens });
+    },
+  );
+
+  /**
+   * DELETE /auth/api-tokens/:tokenId
+   * Revokes an API token. Only the owning user can revoke.
+   */
+  app.delete(
+    '/auth/api-tokens/:tokenId',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['tokenId'],
+          properties: {
+            tokenId: { type: 'string', format: 'uuid' },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { tokenId } = request.params as { tokenId: string };
+      await revokeApiToken(app.db, tokenId, request.user.sub);
+      return reply.send({ success: true, data: { revoked: true } });
+    },
+  );
 }

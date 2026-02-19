@@ -29,6 +29,20 @@
       "when": 1771479884480,
       "tag": "0003_lame_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1771521699788,
+      "tag": "0004_medical_talkback",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771522821197,
+      "tag": "0005_clumsy_reptil",
+      "breakpoints": true
     }
   ]
 }

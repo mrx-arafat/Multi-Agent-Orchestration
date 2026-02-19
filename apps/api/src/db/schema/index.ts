@@ -4,3 +4,7 @@ export * from './agents.js';
 export * from './workflow-runs.js';
 export * from './stage-executions.js';
 export * from './execution-logs.js';
+export * from './api-tokens.js';
+export * from './teams.js';
+export * from './kanban-tasks.js';
+export * from './agent-messages.js';

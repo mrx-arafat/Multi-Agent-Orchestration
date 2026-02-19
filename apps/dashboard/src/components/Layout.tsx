@@ -4,7 +4,9 @@ import { useAuth } from '../lib/auth-context.js';
 const navItems = [
   { to: '/dashboard', label: 'Overview', icon: '⬡' },
   { to: '/agents', label: 'Agents', icon: '⚙' },
+  { to: '/teams', label: 'Teams', icon: '👥' },
   { to: '/workflows', label: 'Workflows', icon: '⇄' },
+  { to: '/settings', label: 'Settings', icon: '☰' },
 ];
 
 export function Layout(){
@@ -50,7 +52,7 @@ export function Layout(){
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto p-6">
         <Outlet />
       </main>
     </div>
