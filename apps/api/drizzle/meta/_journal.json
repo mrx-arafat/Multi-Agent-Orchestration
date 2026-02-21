@@ -43,6 +43,13 @@
       "when": 1771522821197,
       "tag": "0005_clumsy_reptil",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1771588692082,
+      "tag": "0006_lowly_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

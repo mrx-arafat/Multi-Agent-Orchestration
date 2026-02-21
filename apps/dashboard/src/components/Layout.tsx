@@ -1,7 +1,22 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context.js';
+import { useWebSocket } from '../lib/websocket.js';
+import { NotificationBell } from './NotificationBell.js';
 
-const navSections = [
+interface NavItem {
+  to: string;
+  label: string;
+  icon: string;
+  /** Optional: only show for these roles. If omitted, visible to all. */
+  roles?: string[];
+}
+
+interface NavSection {
+  label: string;
+  items: NavItem[];
+}
+
+const navSections: NavSection[] = [
   {
     label: 'Main',
     items: [
@@ -9,6 +24,9 @@ const navSections = [
       { to: '/agents', label: 'Agents', icon: 'M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z' },
       { to: '/teams', label: 'Teams', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z' },
       { to: '/workflows', label: 'Workflows', icon: 'M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15' },
+      { to: '/templates', label: 'Templates', icon: 'M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2' },
+      { to: '/workflow-editor', label: 'Editor', icon: 'M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z', roles: ['admin', 'user'] },
+      { to: '/analytics', label: 'Analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     ],
   },
   {
@@ -29,6 +47,7 @@ function SvgIcon({ path }: { path: string }) {
 
 export function Layout(){
   const { user, logout } = useAuth();
+  const { connected } = useWebSocket();
   const location = useLocation();
 
   // Check if current path is within a team sub-route
@@ -51,45 +70,65 @@ export function Layout(){
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
-          {navSections.map((section) => (
-            <div key={section.label}>
-              <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{section.label}</p>
-              <div className="space-y-0.5">
-                {section.items.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) =>
-                      `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
-                        isActive
-                          ? 'bg-brand-50 text-brand-700 shadow-sm'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                      }`
-                    }
-                  >
-                    <SvgIcon path={item.icon} />
-                    {item.label}
-                  </NavLink>
-                ))}
+          {navSections.map((section) => {
+            const visibleItems = section.items.filter(
+              (item) => !item.roles || item.roles.includes(user?.role ?? 'user'),
+            );
+            if (visibleItems.length === 0) return null;
+            return (
+              <div key={section.label}>
+                <p className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">{section.label}</p>
+                <div className="space-y-0.5">
+                  {visibleItems.map((item) => (
+                    <NavLink
+                      key={item.to}
+                      to={item.to}
+                      className={({ isActive }) =>
+                        `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                          isActive
+                            ? 'bg-brand-50 text-brand-700 shadow-sm'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`
+                      }
+                    >
+                      <SvgIcon path={item.icon} />
+                      {item.label}
+                    </NavLink>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
 
         {/* User footer */}
         <div className="px-4 py-4 border-t border-gray-100">
+          <div className="flex items-center justify-between mb-2">
+            <NotificationBell />
+          </div>
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center">
               <span className="text-xs font-bold text-white">{user?.name?.charAt(0)?.toUpperCase() ?? '?'}</span>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-900 truncate">{user?.name}</p>
-              <p className="text-[10px] text-gray-400 truncate">{user?.email}</p>
+              <div className="flex items-center gap-1">
+                <p className="text-[10px] text-gray-400 truncate">{user?.email}</p>
+                {user?.role === 'admin' && (
+                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-700">
+                    Admin
+                  </span>
+                )}
+              </div>
             </div>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5 px-0.5">
+            <span className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-300'}`} />
+            <span className="text-[10px] text-gray-400">{connected ? 'Live' : 'Offline'}</span>
           </div>
           <button
             onClick={logout}
-            className="mt-3 w-full rounded-lg border border-gray-200 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
+            className="mt-2 w-full rounded-lg border border-gray-200 py-1.5 text-xs text-gray-500 hover:bg-gray-50 hover:text-gray-700 transition-colors"
           >
             Sign out
           </button>

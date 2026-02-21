@@ -24,6 +24,7 @@ import {
   type Agent,
   type Team,
 } from '../lib/api';
+import { useToast } from '../components/Toast';
 
 const COLUMNS = [
   { key: 'backlog', label: 'Backlog', color: 'bg-slate-400', headerBg: 'bg-slate-50', ring: 'ring-slate-200' },
@@ -142,6 +143,7 @@ function KanbanColumn({ column, tasks, agents }: {
 
 export function KanbanPage() {
   const { teamUuid } = useParams<{ teamUuid: string }>();
+  const { toast } = useToast();
   const [team, setTeam] = useState<Team | null>(null);
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -150,6 +152,7 @@ export function KanbanPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ title: '', description: '', priority: 'medium', tags: '' });
   const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [activeTask, setActiveTask] = useState<KanbanTask | null>(null);
 
   const sensors = useSensors(
@@ -193,7 +196,7 @@ export function KanbanPage() {
       setForm({ title: '', description: '', priority: 'medium', tags: '' });
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create task');
+      toast(err instanceof Error ? err.message : 'Failed to create task', 'error');
     } finally {
       setCreating(false);
     }
@@ -236,11 +239,14 @@ export function KanbanPage() {
     if (!task || !teamUuid) return;
 
     // Persist the status change to backend
+    setSaving(true);
     try {
       await updateKanbanTaskStatus(teamUuid, task.taskUuid, task.status);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to move task');
+      toast(err instanceof Error ? err.message : 'Failed to move task', 'error');
       await load(); // revert on failure
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -266,6 +272,12 @@ export function KanbanPage() {
           <div className="h-5 w-px bg-gray-200" />
           <h1 className="text-xl font-bold text-gray-900">Kanban Board</h1>
           <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">{tasks.length} tasks</span>
+          {saving && (
+            <span className="flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500" />
+              Saving...
+            </span>
+          )}
         </div>
         <button
           onClick={() => setShowCreate(!showCreate)}

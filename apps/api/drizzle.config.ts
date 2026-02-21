@@ -16,6 +16,8 @@ export default defineConfig({
     './src/db/schema/kanban-tasks.ts',
     './src/db/schema/agent-messages.ts',
     './src/db/schema/team-invitations.ts',
+    './src/db/schema/workflow-templates.ts',
+    './src/db/schema/notifications.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

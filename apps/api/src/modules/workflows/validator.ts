@@ -94,6 +94,48 @@ export function validateWorkflowDefinition(definition: WorkflowDefinition): void
 }
 
 /**
+ * Returns stages grouped by dependency levels for parallel execution.
+ * Stages within the same level have no dependencies on each other and can run concurrently.
+ * Levels must execute sequentially — all stages in level N must complete before level N+1 starts.
+ */
+export function getExecutionLevels(stages: StageDefinition[]): StageDefinition[][] {
+  const stageMap = new Map(stages.map((s) => [s.id, s]));
+  const inDegree = new Map<string, number>();
+  const adjacency = new Map<string, string[]>();
+
+  for (const stage of stages) {
+    inDegree.set(stage.id, stage.dependencies?.length ?? 0);
+    adjacency.set(stage.id, []);
+  }
+
+  for (const stage of stages) {
+    for (const dep of stage.dependencies ?? []) {
+      adjacency.get(dep)!.push(stage.id);
+    }
+  }
+
+  const levels: StageDefinition[][] = [];
+  let queue = stages.filter((s) => (inDegree.get(s.id) ?? 0) === 0);
+
+  while (queue.length > 0) {
+    levels.push(queue);
+    const nextQueue: StageDefinition[] = [];
+
+    for (const stage of queue) {
+      for (const dependent of adjacency.get(stage.id) ?? []) {
+        const deg = (inDegree.get(dependent) ?? 0) - 1;
+        inDegree.set(dependent, deg);
+        if (deg === 0) nextQueue.push(stageMap.get(dependent)!);
+      }
+    }
+
+    queue = nextQueue;
+  }
+
+  return levels;
+}
+
+/**
  * Returns stages sorted in execution order (topological sort).
  */
 export function getExecutionOrder(stages: StageDefinition[]): StageDefinition[] {

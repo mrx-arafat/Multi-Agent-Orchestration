@@ -15,6 +15,7 @@ import {
 } from '../lib/api';
 import { useAuth } from '../lib/auth-context';
 import { useToast } from '../components/Toast';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export function TeamDetailPage() {
   const { teamUuid } = useParams<{ teamUuid: string }>();
@@ -31,6 +32,8 @@ export function TeamDetailPage() {
   const [tab, setTab] = useState<'agents' | 'invitations' | 'settings'>('agents');
   const [inviteForm, setInviteForm] = useState({ maxUses: 10, expiresInHours: 168 });
   const [creatingInvite, setCreatingInvite] = useState(false);
+  const [confirmRemoveAgent, setConfirmRemoveAgent] = useState<{ agentUuid: string; name: string } | null>(null);
+  const [confirmRevokeInvite, setConfirmRevokeInvite] = useState<{ invitationUuid: string; code: string } | null>(null);
 
   const isOwner = team?.ownerUserUuid === user?.userUuid;
 
@@ -250,7 +253,7 @@ export function TeamDetailPage() {
                     </div>
                   )}
                   {isOwner && (
-                    <button onClick={() => handleRemoveAgent(agent.agentUuid)}
+                    <button onClick={() => setConfirmRemoveAgent({ agentUuid: agent.agentUuid, name: agent.name })}
                       className="text-xs text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity">
                       Remove from team
                     </button>
@@ -319,7 +322,7 @@ export function TeamDetailPage() {
                             {inv.expiresAt && <span>Expires: {new Date(inv.expiresAt).toLocaleDateString()}</span>}
                           </div>
                         </div>
-                        <button onClick={() => handleRevokeInvite(inv.invitationUuid)}
+                        <button onClick={() => setConfirmRevokeInvite({ invitationUuid: inv.invitationUuid, code: inv.inviteCode })}
                           className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 hover:bg-red-50 transition-colors">
                           Revoke
                         </button>
@@ -361,6 +364,32 @@ export function TeamDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialogs */}
+      <ConfirmDialog
+        open={!!confirmRemoveAgent}
+        title="Remove Agent"
+        message={`Are you sure you want to remove "${confirmRemoveAgent?.name}" from this team? The agent will no longer participate in team activities.`}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmRemoveAgent) handleRemoveAgent(confirmRemoveAgent.agentUuid);
+          setConfirmRemoveAgent(null);
+        }}
+        onCancel={() => setConfirmRemoveAgent(null)}
+      />
+      <ConfirmDialog
+        open={!!confirmRevokeInvite}
+        title="Revoke Invitation"
+        message={`Are you sure you want to revoke invite code "${confirmRevokeInvite?.code}"? Anyone with this code will no longer be able to join the team.`}
+        confirmLabel="Revoke"
+        variant="warning"
+        onConfirm={() => {
+          if (confirmRevokeInvite) handleRevokeInvite(confirmRevokeInvite.invitationUuid);
+          setConfirmRevokeInvite(null);
+        }}
+        onCancel={() => setConfirmRevokeInvite(null)}
+      />
     </div>
   );
 }

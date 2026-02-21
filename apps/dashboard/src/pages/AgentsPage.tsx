@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { listAgents, registerAgent, triggerHealthCheck, deleteAgent, type Agent } from '../lib/api.js';
 import { useToast } from '../components/Toast.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 
 const STATUS_STYLES: Record<string, { dot: string; bg: string; text: string }> = {
   online: { dot: 'bg-emerald-400', bg: 'bg-emerald-50', text: 'text-emerald-700' },
@@ -8,22 +9,33 @@ const STATUS_STYLES: Record<string, { dot: string; bg: string; text: string }> =
   offline: { dot: 'bg-gray-300', bg: 'bg-gray-50', text: 'text-gray-500' },
 };
 
+const TYPE_BADGE: Record<string, { bg: string; text: string; label: string }> = {
+  builtin: { bg: 'bg-violet-100', text: 'text-violet-700', label: 'AI Built-in' },
+  generic: { bg: 'bg-gray-100', text: 'text-gray-600', label: 'HTTP' },
+  openclaw: { bg: 'bg-sky-100', text: 'text-sky-700', label: 'OpenClaw' },
+};
+
 function AgentCard({ agent, onHealthCheck, onDelete }: {
   agent: Agent;
   onHealthCheck: (uuid: string) => void;
-  onDelete: (uuid: string) => void;
+  onDelete: (uuid: string, name: string) => void;
 }) {
   const style = STATUS_STYLES[agent.status] ?? STATUS_STYLES.offline!;
+  const isBuiltin = agent.agentType === 'builtin';
+  const typeBadge = TYPE_BADGE[agent.agentType ?? 'generic'] ?? TYPE_BADGE.generic!;
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 hover:shadow-md transition-all group">
+    <div className={`rounded-xl border bg-white p-5 hover:shadow-md transition-all group ${isBuiltin ? 'border-violet-200' : 'border-gray-200'}`}>
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 flex items-center justify-center shadow-sm">
-            <span className="text-sm font-bold text-white">{agent.name.charAt(0).toUpperCase()}</span>
+          <div className={`h-10 w-10 rounded-lg flex items-center justify-center shadow-sm ${isBuiltin ? 'bg-gradient-to-br from-violet-400 to-violet-600' : 'bg-gradient-to-br from-brand-400 to-brand-600'}`}>
+            <span className="text-sm font-bold text-white">{isBuiltin ? 'AI' : agent.name.charAt(0).toUpperCase()}</span>
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-gray-900">{agent.name}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">{agent.name}</h3>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${typeBadge.bg} ${typeBadge.text}`}>{typeBadge.label}</span>
+            </div>
             <p className="text-xs text-gray-400 font-mono">{agent.agentId}</p>
           </div>
         </div>
@@ -47,25 +59,31 @@ function AgentCard({ agent, onHealthCheck, onDelete }: {
 
       <div className="flex items-center justify-between pt-3 border-t border-gray-100">
         <div className="text-[10px] text-gray-400 space-y-0.5">
-          <p className="font-mono truncate max-w-40">{agent.endpoint}</p>
+          {isBuiltin ? (
+            <p>Powered by AI providers (OpenAI, Claude, Gemini)</p>
+          ) : (
+            <p className="font-mono truncate max-w-40">{agent.endpoint}</p>
+          )}
           <p>Registered {new Date(agent.createdAt).toLocaleDateString()}</p>
         </div>
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-          <button
-            onClick={() => onHealthCheck(agent.agentUuid)}
-            className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
-            title="Health check"
-          >
-            Ping
-          </button>
-          <button
-            onClick={() => onDelete(agent.agentUuid)}
-            className="rounded-lg border border-red-200 px-2.5 py-1.5 text-[10px] font-medium text-red-500 hover:bg-red-50"
-            title="Delete agent"
-          >
-            Delete
-          </button>
-        </div>
+        {!isBuiltin && (
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onHealthCheck(agent.agentUuid)}
+              className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-[10px] font-medium text-gray-600 hover:bg-gray-50"
+              title="Health check"
+            >
+              Ping
+            </button>
+            <button
+              onClick={() => onDelete(agent.agentUuid, agent.name)}
+              className="rounded-lg border border-red-200 px-2.5 py-1.5 text-[10px] font-medium text-red-500 hover:bg-red-50"
+              title="Delete agent"
+            >
+              Delete
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -78,20 +96,28 @@ export function AgentsPage(){
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [showRegister, setShowRegister] = useState(false);
   const [regForm, setRegForm] = useState({
     agentId: '', name: '', endpoint: '', authToken: '', description: '',
     capabilities: '', agentType: 'generic', createTeam: false, teamName: '',
   });
   const [registering, setRegistering] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<{ uuid: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const ITEMS_PER_PAGE = 12;
 
   async function loadAgents() {
     setLoading(true);
     setError(null);
     try {
-      const result = await listAgents({ status: statusFilter || undefined, limit: 50 });
+      const result = await listAgents({ status: statusFilter || undefined, page, limit: ITEMS_PER_PAGE });
       setAgents(result.agents);
       setTotal(result.meta.total);
+      setTotalPages(result.meta.pages);
     } catch {
       setError('Failed to load agents');
     } finally {
@@ -99,7 +125,20 @@ export function AgentsPage(){
     }
   }
 
-  useEffect(() => { void loadAgents(); }, [statusFilter]);
+  useEffect(() => { void loadAgents(); }, [statusFilter, page]);
+
+  // Client-side search filtering
+  const filteredAgents = useMemo(() => {
+    if (!searchQuery.trim()) return agents;
+    const q = searchQuery.toLowerCase();
+    return agents.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        a.agentId.toLowerCase().includes(q) ||
+        a.capabilities.some((c) => c.toLowerCase().includes(q)) ||
+        (a.description?.toLowerCase().includes(q) ?? false),
+    );
+  }, [agents, searchQuery]);
 
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
@@ -138,45 +177,75 @@ export function AgentsPage(){
     }
   }
 
-  async function handleDelete(agentUuid: string) {
+  function handleDeleteRequest(agentUuid: string, name: string) {
+    setConfirmDelete({ uuid: agentUuid, name });
+  }
+
+  async function handleDeleteConfirm() {
+    if (!confirmDelete) return;
+    setDeleting(true);
     try {
-      await deleteAgent(agentUuid);
+      await deleteAgent(confirmDelete.uuid);
       toast('Agent deleted', 'success');
+      setConfirmDelete(null);
       await loadAgents();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Failed to delete agent', 'error');
+    } finally {
+      setDeleting(false);
     }
   }
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Agent Registry</h1>
           <p className="text-sm text-gray-500 mt-1">{total} registered agent{total !== 1 ? 's' : ''}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          >
-            <option value="">All statuses</option>
-            <option value="online">Online</option>
-            <option value="degraded">Degraded</option>
-            <option value="offline">Offline</option>
-          </select>
-          <button
-            onClick={() => setShowRegister(!showRegister)}
-            className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-medium text-white hover:from-brand-600 hover:to-brand-700 shadow-sm transition-all"
-          >
-            {showRegister ? 'Cancel' : '+ Register Agent'}
-          </button>
+        <button
+          onClick={() => setShowRegister(!showRegister)}
+          className="rounded-lg bg-gradient-to-r from-brand-500 to-brand-600 px-4 py-2 text-sm font-medium text-white hover:from-brand-600 hover:to-brand-700 shadow-sm transition-all"
+        >
+          {showRegister ? 'Cancel' : '+ Register Agent'}
+        </button>
+      </div>
+
+      {/* Search & Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Search by name, ID, or capability..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-lg border border-gray-300 pl-10 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+          />
         </div>
+        <select
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+        >
+          <option value="">All statuses</option>
+          <option value="online">Online</option>
+          <option value="degraded">Degraded</option>
+          <option value="offline">Offline</option>
+        </select>
       </div>
 
       {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">{error}</div>
+        <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700 flex items-center gap-2">
+          <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+          </svg>
+          {error}
+          <button onClick={() => void loadAgents()} className="ml-auto text-red-600 hover:text-red-800 text-xs font-medium">Retry</button>
+        </div>
       )}
 
       {/* Registration form */}
@@ -257,25 +326,93 @@ export function AgentsPage(){
             </div>
           ))}
         </div>
-      ) : agents.length === 0 ? (
+      ) : filteredAgents.length === 0 ? (
         <div className="rounded-xl border border-gray-200 bg-white p-12 text-center">
-          <div className="text-4xl mb-3">🤖</div>
-          <h3 className="text-lg font-medium text-gray-900 mb-1">No agents registered</h3>
-          <p className="text-sm text-gray-500 mb-4">Register your first agent to get started with orchestration.</p>
-          <button
-            onClick={() => setShowRegister(true)}
-            className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600"
-          >
-            Register Agent
-          </button>
+          <div className="mx-auto mb-4 h-16 w-16 rounded-full bg-brand-50 flex items-center justify-center">
+            <svg className="h-8 w-8 text-brand-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" />
+            </svg>
+          </div>
+          {searchQuery ? (
+            <>
+              <h3 className="text-lg font-medium text-gray-900 mb-1">No agents match "{searchQuery}"</h3>
+              <p className="text-sm text-gray-500 mb-4">Try a different search term or clear the filter.</p>
+              <button onClick={() => setSearchQuery('')} className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50">
+                Clear Search
+              </button>
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-medium text-gray-900 mb-1">No agents registered</h3>
+              <p className="text-sm text-gray-500 mb-4">Register your first agent to get started with orchestration.</p>
+              <button onClick={() => setShowRegister(true)} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600">
+                Register Agent
+              </button>
+            </>
+          )}
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {agents.map((agent) => (
-            <AgentCard key={agent.agentUuid} agent={agent} onHealthCheck={handleHealthCheck} onDelete={handleDelete} />
-          ))}
-        </div>
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {filteredAgents.map((agent) => (
+              <AgentCard key={agent.agentUuid} agent={agent} onHealthCheck={handleHealthCheck} onDelete={handleDeleteRequest} />
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2">
+              <p className="text-xs text-gray-500">
+                Showing {(page - 1) * ITEMS_PER_PAGE + 1}–{Math.min(page * ITEMS_PER_PAGE, total)} of {total}
+              </p>
+              <div className="flex gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+                  .map((p, idx, arr) => (
+                    <span key={p}>
+                      {idx > 0 && arr[idx - 1] !== p - 1 && (
+                        <span className="px-1 text-xs text-gray-400">...</span>
+                      )}
+                      <button
+                        onClick={() => setPage(p)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                          p === page ? 'bg-brand-500 text-white' : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    </span>
+                  ))}
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete Agent"
+        message={`Are you sure you want to delete "${confirmDelete?.name}"? This action cannot be undone. The agent will be unregistered from all teams.`}
+        confirmLabel={deleting ? 'Deleting...' : 'Delete Agent'}
+        variant="danger"
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setConfirmDelete(null)}
+      />
     </div>
   );
 }

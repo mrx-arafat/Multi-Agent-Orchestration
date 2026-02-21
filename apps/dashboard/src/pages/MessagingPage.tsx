@@ -9,6 +9,7 @@ import {
   type Agent,
   type Team,
 } from '../lib/api';
+import { useTeamEvents, useRealtimeEvent } from '../lib/websocket';
 
 const AGENT_COLORS = [
   'from-blue-500 to-blue-600',
@@ -63,17 +64,27 @@ export function MessagingPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Poll every 5s
+  // Subscribe to real-time team events via WebSocket
+  useTeamEvents(teamUuid);
+
+  // Refresh messages on real-time message events
+  const refreshMessages = useCallback(async () => {
+    if (!teamUuid) return;
+    try {
+      const msgData = await listTeamMessages(teamUuid, { limit: 100 });
+      setMessages(msgData.messages.reverse());
+    } catch { /* ignore — will retry on next event or poll */ }
+  }, [teamUuid]);
+
+  useRealtimeEvent('message:new', refreshMessages);
+  useRealtimeEvent('message:broadcast', refreshMessages);
+
+  // Fallback polling every 30s (in case WS disconnects)
   useEffect(() => {
     if (!teamUuid) return;
-    const interval = setInterval(async () => {
-      try {
-        const msgData = await listTeamMessages(teamUuid, { limit: 100 });
-        setMessages(msgData.messages.reverse());
-      } catch { /* ignore */ }
-    }, 5000);
+    const interval = setInterval(refreshMessages, 30000);
     return () => clearInterval(interval);
-  }, [teamUuid]);
+  }, [teamUuid, refreshMessages]);
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();

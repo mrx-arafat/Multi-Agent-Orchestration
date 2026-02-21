@@ -134,7 +134,7 @@ export async function registerAgent(
         authTokenEncrypted,
         capabilities: params.capabilities ?? [],
         maxConcurrentTasks: params.maxConcurrentTasks ?? 5,
-        agentType: (params.agentType ?? 'generic') as 'generic' | 'openclaw',
+        agentType: (params.agentType ?? 'generic') as 'generic' | 'openclaw' | 'builtin',
         teamUuid,
         registeredByUserUuid: params.registeredByUserUuid,
         status: 'offline',

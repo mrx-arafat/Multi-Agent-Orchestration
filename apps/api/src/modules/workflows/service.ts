@@ -16,7 +16,9 @@ export interface WorkflowRunSummary {
     total: number;
     completed: number;
     failed: number;
+    inProgress: number;
     current: string | null;
+    currentStages: string[];
   };
   createdAt: Date;
   startedAt: Date | null;
@@ -141,8 +143,8 @@ export async function getWorkflowStatus(
 
   const stats = stageStats[0] ?? { total: 0, completed: 0, failed: 0, inProgress: 0 };
 
-  // Find currently executing stage
-  const [currentStage] = await db
+  // Find all currently executing stages (supports parallel execution)
+  const currentStages = await db
     .select({ stageId: stageExecutions.stageId })
     .from(stageExecutions)
     .where(
@@ -150,8 +152,9 @@ export async function getWorkflowStatus(
         eq(stageExecutions.workflowRunId, workflowRunId),
         eq(stageExecutions.status, 'in_progress'),
       ),
-    )
-    .limit(1);
+    );
+
+  const currentStageIds = currentStages.map((s) => s.stageId);
 
   return {
     workflowRunId: run.workflowRunId,
@@ -161,7 +164,9 @@ export async function getWorkflowStatus(
       total: stats.total,
       completed: stats.completed,
       failed: stats.failed,
-      current: currentStage?.stageId ?? null,
+      inProgress: stats.inProgress,
+      current: currentStageIds[0] ?? null,
+      currentStages: currentStageIds,
     },
     createdAt: run.createdAt,
     startedAt: run.startedAt ?? null,

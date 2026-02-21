@@ -83,8 +83,9 @@ beforeAll(async () => {
   process.env['MAOF_DB_NAME'] = 'maof_test';
 
   // Flush stale BullMQ keys BEFORE creating app (so queue/worker start clean)
-  const { default: Redis } = await import('ioredis');
-  const tmpRedis = new Redis({
+  const ioredis = await import('ioredis');
+  const Redis = ioredis.default ?? ioredis;
+  const tmpRedis = new (Redis as unknown as new (opts: Record<string, unknown>) => import('ioredis').Redis)({
     host: process.env['MAOF_REDIS_HOST'] ?? 'localhost',
     port: Number(process.env['MAOF_REDIS_PORT'] ?? 6379),
     password: process.env['MAOF_REDIS_PASSWORD'] || undefined,

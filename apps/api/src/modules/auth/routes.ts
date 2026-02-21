@@ -7,7 +7,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { getConfig } from '../../config/index.js';
-import { registerUser, validateCredentials, getUserByUuid } from './service.js';
+import { registerUser, validateCredentials, getUserByUuid, updateUserProfile } from './service.js';
 import { registerSchema, loginSchema, refreshSchema } from './schemas.js';
 import type { JwtPayload } from '../../plugins/authenticate.js';
 import { ApiError } from '../../types/index.js';
@@ -116,6 +116,33 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
     const user = await getUserByUuid(app.db, request.user.sub);
     return reply.send({ success: true, data: user });
   });
+
+  /**
+   * PATCH /auth/profile
+   * Body: { name }
+   * Updates the authenticated user's profile.
+   */
+  app.patch(
+    '/auth/profile',
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name'],
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 255 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { name } = request.body as { name: string };
+      const user = await updateUserProfile(app.db, request.user.sub, { name });
+      return reply.send({ success: true, data: user });
+    },
+  );
 
   // ── API Token Management (Phase 2) ────────────────────────────────────
 

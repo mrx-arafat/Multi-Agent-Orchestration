@@ -10,7 +10,7 @@ import {
 } from 'drizzle-orm/pg-core';
 
 export const agentStatusEnum = pgEnum('agent_status', ['online', 'degraded', 'offline']);
-export const agentTypeEnum = pgEnum('agent_type', ['generic', 'openclaw']);
+export const agentTypeEnum = pgEnum('agent_type', ['generic', 'openclaw', 'builtin']);
 
 /**
  * Agents table — from SRS Section 6.1

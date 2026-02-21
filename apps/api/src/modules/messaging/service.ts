@@ -7,6 +7,7 @@ import { eq, and, isNull, sql, desc, or } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
 import { agentMessages, agents } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
+import { emitTeamEvent } from '../../lib/event-bus.js';
 
 export interface SafeMessage {
   messageUuid: string;
@@ -99,7 +100,9 @@ export async function sendMessage(
     .returning();
 
   if (!created) throw ApiError.internal('Failed to send message');
-  return toSafe(created);
+  const safe = toSafe(created);
+  emitTeamEvent(params.teamUuid, 'message:new', safe as unknown as Record<string, unknown>);
+  return safe;
 }
 
 /**

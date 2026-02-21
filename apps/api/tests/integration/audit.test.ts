@@ -150,7 +150,7 @@ describe('Audit log entries', () => {
         expect(sig['algorithm']).toBe('RS256');
         expect(sig['signer']).toBe('maof-core');
         expect(typeof sig['value']).toBe('string');
-        expect(sig['value'].length).toBeGreaterThan(0);
+        expect(sig['value']!.length).toBeGreaterThan(0);
         expect(typeof sig['timestamp']).toBe('string');
       }
     }

@@ -8,11 +8,11 @@ import type { ConnectionOptions } from 'bullmq';
 import { eq } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { workflowRuns, stageExecutions } from '../db/schema/index.js';
-import { getExecutionOrder } from '../modules/workflows/validator.js';
+import { getExecutionLevels } from '../modules/workflows/validator.js';
 import type { WorkflowDefinition, StageDefinition } from '../modules/workflows/validator.js';
 import { WORKFLOW_QUEUE_NAME, type WorkflowJobData } from './workflow-queue.js';
 import { logStageExecution } from '../modules/audit/service.js';
-import { findAgentForCapability } from '../modules/agents/router.js';
+import { findAgentForCapability, recordAgentResponseTime } from '../modules/agents/router.js';
 import { getAgentAuthToken } from '../modules/agents/service.js';
 import { callAgent, AgentCallError, type AgentRequest } from '../lib/agent-client.js';
 import { getConfig } from '../config/index.js';
@@ -20,6 +20,9 @@ import type { Redis } from 'ioredis';
 import { incrementAgentTasks, decrementAgentTasks } from '../modules/agents/task-tracker.js';
 import { writeMemory } from '../modules/memory/service.js';
 import { cacheStageOutput } from '../lib/cache.js';
+import { emitUserEvent } from '../lib/event-bus.js';
+import { createNotification } from '../modules/notifications/service.js';
+import { executeWithBuiltinAgent } from '../modules/builtin-agents/index.js';
 
 /**
  * Resolves variable interpolation: ${stageId.output.field} or ${workflow.input.field}
@@ -132,7 +135,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Executes a single stage — dispatches to real agent or mock based on config.
+ * Executes a single stage — dispatches to real agent, builtin AI, or mock based on config.
  */
 async function executeStage(
   db: Database,
@@ -149,6 +152,15 @@ async function executeStage(
       db, stage, resolvedInput, workflowRunId, userUuid, completedStageIds,
       config.MAOF_AGENT_CALL_TIMEOUT_MS,
     );
+  }
+
+  if (config.MAOF_AGENT_DISPATCH_MODE === 'builtin') {
+    const result = await executeWithBuiltinAgent(
+      stage.agentCapability,
+      stage.id,
+      resolvedInput,
+    );
+    return { output: result.output, agentId: result.agentId };
   }
 
   return simulateAgentExecution(stage, resolvedInput);
@@ -175,8 +187,18 @@ export async function executeStageWithRetry(
   const config = getConfig();
 
   // Mock mode skips retry logic entirely
-  if (config.MAOF_AGENT_DISPATCH_MODE !== 'real') {
+  if (config.MAOF_AGENT_DISPATCH_MODE === 'mock') {
     return simulateAgentExecution(stage, resolvedInput);
+  }
+
+  // Builtin mode — uses AI providers directly, no retry/fallback agent logic
+  if (config.MAOF_AGENT_DISPATCH_MODE === 'builtin') {
+    const result = await executeWithBuiltinAgent(
+      stage.agentCapability,
+      stage.id,
+      resolvedInput,
+    );
+    return { output: result.output, agentId: result.agentId };
   }
 
   const maxRetries = stage.retryConfig?.maxRetries ?? 2;
@@ -222,7 +244,12 @@ export async function executeStageWithRetry(
             },
           };
 
+          const callStart = Date.now();
           const response = await callAgent(agent.endpoint, authToken, request, timeoutMs);
+          // Record response time for smart routing scoring
+          if (redis) {
+            await recordAgentResponseTime(redis, agent.agentUuid, Date.now() - callStart).catch(() => {});
+          }
           const result: { output: Record<string, unknown>; agentId: string; memoryWrites?: Record<string, unknown> } = {
             agentId: agent.agentId,
             output: response.output,
@@ -316,108 +343,152 @@ export function createWorkflowWorker(
       const stageOutputs = new Map<string, unknown>();
       const completedStageIds: string[] = [];
 
-      // Execute stages in topological order
-      const orderedStages = getExecutionOrder(definition.stages);
+      // Group stages by dependency levels for parallel execution
+      const levels = getExecutionLevels(definition.stages);
+      const totalStageCount = definition.stages.length;
 
-      for (const stage of orderedStages) {
-        const resolvedInput = resolveVariables(stage.input ?? {}, { workflowInput, stageOutputs }) as Record<string, unknown>;
+      // Execute each level: stages within a level run concurrently,
+      // levels execute sequentially (all stages in level N must complete before level N+1)
+      for (const level of levels) {
+        const levelPromises = level.map(async (stage) => {
+          const resolvedInput = resolveVariables(stage.input ?? {}, { workflowInput, stageOutputs }) as Record<string, unknown>;
 
-        // Create stage execution record
-        const [stageExec] = await db
-          .insert(stageExecutions)
-          .values({
-            workflowRunId,
-            stageId: stage.id,
-            agentId: stage.agentCapability, // Updated after dispatch
-            status: 'in_progress',
-            input: resolvedInput,
-            startedAt: new Date(),
-          })
-          .returning();
-
-        if (!stageExec) throw new Error(`Failed to create stage execution for '${stage.id}'`);
-
-        const startTime = Date.now();
-
-        try {
-          const { output, agentId, memoryWrites } = await executeStageWithRetry(
-            db, stage, resolvedInput, workflowRunId, userUuid, completedStageIds, redis,
-          );
-          const executionTimeMs = Date.now() - startTime;
-
-          // Persist agent memory_writes to Redis (SRS FR-3.3)
-          if (memoryWrites && redis) {
-            for (const [key, value] of Object.entries(memoryWrites)) {
-              await writeMemory(redis, { workflowRunId, key, value }).catch(() => {});
-            }
-          }
-
-          // Update stage execution as completed with actual agent ID
-          await db
-            .update(stageExecutions)
-            .set({
-              status: 'completed',
-              output,
-              agentId,
-              completedAt: new Date(),
-              executionTimeMs,
+          // Create stage execution record
+          const [stageExec] = await db
+            .insert(stageExecutions)
+            .values({
+              workflowRunId,
+              stageId: stage.id,
+              agentId: stage.agentCapability, // Updated after dispatch
+              status: 'in_progress',
+              input: resolvedInput,
+              startedAt: new Date(),
             })
-            .where(eq(stageExecutions.id, stageExec.id));
+            .returning();
 
-          // Audit log
-          await logStageExecution(db, {
-            workflowRunId,
-            stageId: stage.id,
-            agentId,
-            action: 'execute',
-            input: resolvedInput,
-            output,
-            status: 'completed',
-          });
+          if (!stageExec) throw new Error(`Failed to create stage execution for '${stage.id}'`);
 
-          // Cache stage output in Redis for fast context lookups (Phase 2)
-          if (redis) {
-            await cacheStageOutput(redis, workflowRunId, stage.id, output).catch(() => {});
+          const startTime = Date.now();
+
+          try {
+            const { output, agentId, memoryWrites } = await executeStageWithRetry(
+              db, stage, resolvedInput, workflowRunId, userUuid, completedStageIds, redis,
+            );
+            const executionTimeMs = Date.now() - startTime;
+
+            // Persist agent memory_writes to Redis (SRS FR-3.3)
+            if (memoryWrites && redis) {
+              for (const [key, value] of Object.entries(memoryWrites)) {
+                await writeMemory(redis, { workflowRunId, key, value }).catch(() => {});
+              }
+            }
+
+            // Update stage execution as completed with actual agent ID
+            await db
+              .update(stageExecutions)
+              .set({
+                status: 'completed',
+                output,
+                agentId,
+                completedAt: new Date(),
+                executionTimeMs,
+              })
+              .where(eq(stageExecutions.id, stageExec.id));
+
+            // Audit log
+            await logStageExecution(db, {
+              workflowRunId,
+              stageId: stage.id,
+              agentId,
+              action: 'execute',
+              input: resolvedInput,
+              output,
+              status: 'completed',
+            });
+
+            // Cache stage output in Redis for fast context lookups
+            if (redis) {
+              await cacheStageOutput(redis, workflowRunId, stage.id, output).catch(() => {});
+            }
+
+            return { stage, output, agentId };
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : 'Stage execution failed';
+            const agentId = err instanceof AgentCallError ? err.agentId : stage.agentCapability;
+
+            await db
+              .update(stageExecutions)
+              .set({
+                status: 'failed',
+                agentId,
+                errorMessage,
+                completedAt: new Date(),
+                executionTimeMs: Date.now() - startTime,
+              })
+              .where(eq(stageExecutions.id, stageExec.id));
+
+            await logStageExecution(db, {
+              workflowRunId,
+              stageId: stage.id,
+              agentId,
+              action: 'fail',
+              input: resolvedInput,
+              status: 'failed',
+            }).catch(() => {});
+
+            // Re-throw with stage context attached
+            const stageError = new Error(`Stage '${stage.id}' failed: ${errorMessage}`);
+            (stageError as unknown as Record<string, unknown>).stageId = stage.id;
+            throw stageError;
           }
+        });
 
-          stageOutputs.set(stage.id, output);
-          completedStageIds.push(stage.id);
+        // Execute all stages in this level concurrently; fail fast on first error
+        let results: { stage: StageDefinition; output: Record<string, unknown>; agentId: string }[];
+        try {
+          results = await Promise.all(levelPromises);
         } catch (err) {
           const errorMessage = err instanceof Error ? err.message : 'Stage execution failed';
-          const agentId = err instanceof AgentCallError ? err.agentId : stage.agentCapability;
+          const failedStageId = (err as Record<string, unknown>).stageId as string ?? 'unknown';
 
-          await db
-            .update(stageExecutions)
-            .set({
-              status: 'failed',
-              agentId,
-              errorMessage,
-              completedAt: new Date(),
-              executionTimeMs: Date.now() - startTime,
-            })
-            .where(eq(stageExecutions.id, stageExec.id));
-
-          // Audit log: failure
-          await logStageExecution(db, {
-            workflowRunId,
-            stageId: stage.id,
-            agentId,
-            action: 'fail',
-            input: resolvedInput,
-            status: 'failed',
-          }).catch(() => {}); // Best-effort
-
-          // Mark workflow as failed
           await db
             .update(workflowRuns)
             .set({
               status: 'failed',
               completedAt: new Date(),
-              errorMessage: `Stage '${stage.id}' failed: ${errorMessage}`,
+              errorMessage,
             })
             .where(eq(workflowRuns.workflowRunId, workflowRunId));
 
+          emitUserEvent(userUuid, 'workflow:failed', {
+            workflowRunId,
+            stageId: failedStageId,
+            errorMessage,
+          });
+
+          await createNotification(db, {
+            userUuid,
+            type: 'workflow_failed',
+            title: `Workflow "${definition.name}" failed`,
+            body: errorMessage,
+            metadata: { workflowRunId, stageId: failedStageId },
+          }).catch(() => {});
+
           throw err;
+        }
+
+        // Collect outputs from all completed stages in this level
+        for (const { stage, output, agentId } of results) {
+          stageOutputs.set(stage.id, output);
+          completedStageIds.push(stage.id);
+
+          emitUserEvent(userUuid, 'workflow:stage_completed', {
+            workflowRunId,
+            stageId: stage.id,
+            agentId,
+            completedCount: completedStageIds.length,
+            totalCount: totalStageCount,
+          });
         }
       }
 
@@ -430,7 +501,22 @@ export function createWorkflowWorker(
         })
         .where(eq(workflowRuns.workflowRunId, workflowRunId));
 
-      const lastStage = orderedStages.at(-1);
+      emitUserEvent(userUuid, 'workflow:completed', {
+        workflowRunId,
+        workflowName: definition.name,
+        stageCount: totalStageCount,
+      });
+
+      await createNotification(db, {
+        userUuid,
+        type: 'workflow_completed',
+        title: `Workflow "${definition.name}" completed`,
+        body: `All ${totalStageCount} stages completed successfully.`,
+        metadata: { workflowRunId },
+      }).catch(() => {});
+
+      const lastLevel = levels.at(-1);
+      const lastStage = lastLevel?.at(-1);
       return { finalOutput: lastStage ? stageOutputs.get(lastStage.id) : undefined };
     },
     {

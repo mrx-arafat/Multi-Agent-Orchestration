@@ -127,3 +127,25 @@ export async function getUserByUuid(db: Database, userUuid: string): Promise<Saf
 
   return toSafeUser(user);
 }
+
+/**
+ * Updates a user's profile (currently: name only).
+ * Throws ApiError(404) if not found.
+ */
+export async function updateUserProfile(
+  db: Database,
+  userUuid: string,
+  params: { name: string },
+): Promise<SafeUser> {
+  const [updated] = await db
+    .update(users)
+    .set({ name: params.name })
+    .where(eq(users.userUuid, userUuid))
+    .returning();
+
+  if (!updated) {
+    throw ApiError.notFound('User not found');
+  }
+
+  return toSafeUser(updated);
+}

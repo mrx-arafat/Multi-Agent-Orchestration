@@ -21,6 +21,7 @@ import {
 } from './schemas.js';
 import { checkAgentHealth } from './health-checker.js';
 import { getAgentActivity } from './activity-service.js';
+import { matchAgentsForCapability } from './router.js';
 
 export async function agentRoutes(app: FastifyInstance): Promise<void> {
   /**
@@ -114,6 +115,32 @@ export async function agentRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { agentUuid } = request.params as { agentUuid: string };
       const result = await checkAgentHealth(app.db, agentUuid);
+      return reply.send({ success: true, data: result });
+    },
+  );
+
+  /**
+   * GET /agents/match/:capability
+   * Returns scored agents matching a capability, with the recommended best agent.
+   * Used for smart routing decisions and capability inspection.
+   */
+  app.get(
+    '/agents/match/:capability',
+    {
+      schema: {
+        params: {
+          type: 'object',
+          required: ['capability'],
+          properties: {
+            capability: { type: 'string', minLength: 1 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { capability } = request.params as { capability: string };
+      const result = await matchAgentsForCapability(app.db, capability, app.redis);
       return reply.send({ success: true, data: result });
     },
   );

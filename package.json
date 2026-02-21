@@ -6,7 +6,10 @@
   "author": "mrx-arafat <arafatmrx@gmail.com>",
   "license": "Apache-2.0",
   "scripts": {
+    "app": "pnpm --filter api --filter dashboard -r --parallel dev",
     "dev": "pnpm --filter api dev",
+    "dev:dashboard": "pnpm --filter dashboard dev",
+    "dev:mcp": "pnpm --filter @maof/mcp-bridge dev",
     "build": "pnpm -r build",
     "test": "pnpm --filter api test",
     "lint": "pnpm -r lint",

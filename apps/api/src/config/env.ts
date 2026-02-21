@@ -39,7 +39,7 @@ const envSchema = z.object({
 
   // Agent dispatch
   MAOF_AGENT_DISPATCH_MODE: z
-    .enum(['real', 'mock'])
+    .enum(['real', 'mock', 'builtin'])
     .default('mock'),
   // AES-256 key (64 hex chars = 32 bytes) for encrypting agent auth tokens at rest.
   // Required when MAOF_AGENT_DISPATCH_MODE=real. Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
@@ -57,6 +57,12 @@ const envSchema = z.object({
   // Optional: auto-generates in dev/test if missing.
   MAOF_AUDIT_SIGNING_KEY: z.string().optional(),
   MAOF_AUDIT_SIGNING_PUBLIC_KEY: z.string().optional(),
+
+  // AI Providers (Phase 4) — at least one key required for builtin dispatch mode
+  MAOF_OPENAI_API_KEY: z.string().optional(),
+  MAOF_ANTHROPIC_API_KEY: z.string().optional(),
+  MAOF_GOOGLE_AI_API_KEY: z.string().optional(),
+  MAOF_DEFAULT_AI_PROVIDER: z.enum(['openai', 'anthropic', 'google']).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

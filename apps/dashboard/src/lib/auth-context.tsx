@@ -23,6 +23,7 @@ interface AuthContextValue extends Omit<AuthState, 'isRestoring'> {
   isRestoring: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -69,8 +70,17 @@ export function AuthProvider({ children }: { children: ReactNode }){
     setState({ user: null, isLoading: false, isRestoring: false });
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    try {
+      const user = await getCurrentUser();
+      setState((s) => ({ ...s, user }));
+    } catch {
+      // Silently fail — user data will be stale until next login
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ ...state, login, logout }}>
+    <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

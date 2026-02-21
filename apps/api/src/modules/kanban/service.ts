@@ -9,6 +9,7 @@ import type { Database } from '../../db/index.js';
 import { kanbanTasks, agents } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
 import { assertTeamMember } from '../teams/service.js';
+import { emitTeamEvent } from '../../lib/event-bus.js';
 
 export interface SafeKanbanTask {
   taskUuid: string;
@@ -90,7 +91,9 @@ export async function createTask(
     .returning();
 
   if (!created) throw ApiError.internal('Failed to create kanban task');
-  return toSafe(created);
+  const safe = toSafe(created);
+  emitTeamEvent(params.teamUuid, 'task:created', safe as unknown as Record<string, unknown>);
+  return safe;
 }
 
 /**
@@ -187,7 +190,9 @@ export async function claimTask(
     .returning();
 
   if (!updated) throw ApiError.internal('Failed to claim task');
-  return toSafe(updated);
+  const safe = toSafe(updated);
+  emitTeamEvent(teamUuid, 'task:claimed', safe as unknown as Record<string, unknown>);
+  return safe;
 }
 
 /**
@@ -222,7 +227,9 @@ export async function updateTaskStatus(
     .returning();
 
   if (!updated) throw ApiError.notFound('Task');
-  return toSafe(updated);
+  const safe = toSafe(updated);
+  emitTeamEvent(teamUuid, 'task:updated', safe as unknown as Record<string, unknown>);
+  return safe;
 }
 
 /**
