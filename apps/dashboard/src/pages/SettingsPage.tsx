@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../lib/auth-context';
-import { useToast } from '../components/Toast';
-import { ConfirmDialog } from '../components/ConfirmDialog';
-import { getAIStatus, updateProfile, createApiToken, listApiTokens, revokeApiToken, type AIStatus, type ApiToken } from '../lib/api';
+import { useAuth } from '../lib/auth-context.js';
+import { useToast } from '../components/Toast.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { getAIStatus, updateProfile, createApiToken, listApiTokens, revokeApiToken, type AIStatus, type ApiToken } from '../lib/api.js';
 
 const PROVIDER_INFO: Record<string, { label: string; color: string; docs: string }> = {
   openai: { label: 'OpenAI', color: 'bg-emerald-500', docs: 'MAOF_OPENAI_API_KEY' },

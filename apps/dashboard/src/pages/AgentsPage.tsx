@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { listAgents, registerAgent, triggerHealthCheck, deleteAgent, type Agent } from '../lib/api.js';
 import { useToast } from '../components/Toast.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -110,7 +110,7 @@ export function AgentsPage(){
 
   const ITEMS_PER_PAGE = 12;
 
-  async function loadAgents() {
+  const loadAgents = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -123,9 +123,9 @@ export function AgentsPage(){
     } finally {
       setLoading(false);
     }
-  }
+  }, [statusFilter, page]);
 
-  useEffect(() => { void loadAgents(); }, [statusFilter, page]);
+  useEffect(() => { void loadAgents(); }, [loadAgents]);
 
   // Client-side search filtering
   const filteredAgents = useMemo(() => {

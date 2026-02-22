@@ -3,14 +3,11 @@
  * Allows users to create workflow stages, configure inputs/outputs,
  * set dependencies, and execute or save as template.
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   executeWorkflow,
   createWorkflowTemplate,
-  listAgents,
-  type Agent,
 } from '../lib/api.js';
-import { useEffect } from 'react';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -40,10 +37,9 @@ const BUILTIN_CAPABILITIES = [
 
 // ── Helper: Generate Stage ID ─────────────────────────────────────────
 
-let stageCounter = 0;
-function nextStageId(): string {
-  stageCounter++;
-  return `stage_${stageCounter}`;
+function nextStageId(counterRef: React.MutableRefObject<number>): string {
+  counterRef.current++;
+  return `stage_${counterRef.current}`;
 }
 
 // ── Stage Card Component ──────────────────────────────────────────────
@@ -402,14 +398,10 @@ export function WorkflowEditorPage() {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [workflowInput, setWorkflowInput] = useState('{}');
-  const [_agents, setAgents] = useState<Agent[]>([]);
-
-  useEffect(() => {
-    listAgents().then(r => setAgents(r.agents)).catch(() => {});
-  }, []);
+  const stageCounterRef = useRef(0);
 
   const addStage = useCallback(() => {
-    const id = nextStageId();
+    const id = nextStageId(stageCounterRef);
     const newStage: StageNode = {
       id,
       name: `Stage ${workflow.stages.length + 1}`,
@@ -665,7 +657,7 @@ export function WorkflowEditorPage() {
             <div className="space-y-2">
               <button
                 onClick={() => {
-                  stageCounter = 0;
+                  stageCounterRef.current = 0;
                   setWorkflow({
                     name: 'Text Translation Pipeline',
                     stages: [
@@ -681,7 +673,7 @@ export function WorkflowEditorPage() {
               </button>
               <button
                 onClick={() => {
-                  stageCounter = 0;
+                  stageCounterRef.current = 0;
                   setWorkflow({
                     name: 'Code Review Workflow',
                     stages: [
@@ -697,7 +689,7 @@ export function WorkflowEditorPage() {
               </button>
               <button
                 onClick={() => {
-                  stageCounter = 0;
+                  stageCounterRef.current = 0;
                   setWorkflow({
                     name: 'Research & Content Pipeline',
                     stages: [

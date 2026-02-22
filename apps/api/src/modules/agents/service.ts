@@ -166,7 +166,7 @@ export async function listAgents(
   params: { capability?: string; status?: string; page?: number; limit?: number },
 ): Promise<AgentListResult> {
   const page = params.page ?? 1;
-  const limit = params.limit ?? 20;
+  const limit = Math.min(params.limit ?? 20, 100);
   const offset = (page - 1) * limit;
 
   // Build base conditions

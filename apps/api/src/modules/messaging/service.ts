@@ -121,7 +121,7 @@ export async function listMessages(
   },
 ): Promise<{ messages: SafeMessage[]; meta: { total: number; page: number; limit: number } }> {
   const page = params.page ?? 1;
-  const limit = params.limit ?? 50;
+  const limit = Math.min(params.limit ?? 50, 200);
   const offset = (page - 1) * limit;
 
   const conditions = [
@@ -168,7 +168,7 @@ export async function listTeamMessages(
   },
 ): Promise<{ messages: SafeMessage[]; meta: { total: number; page: number; limit: number } }> {
   const page = params.page ?? 1;
-  const limit = params.limit ?? 50;
+  const limit = Math.min(params.limit ?? 50, 200);
   const offset = (page - 1) * limit;
 
   const conditions = [eq(agentMessages.teamUuid, teamUuid)];

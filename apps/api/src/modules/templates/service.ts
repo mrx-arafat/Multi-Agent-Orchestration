@@ -48,7 +48,7 @@ export async function listTemplates(
   },
 ): Promise<{ templates: SafeTemplate[]; meta: { total: number; page: number; limit: number } }> {
   const page = params.page ?? 1;
-  const limit = params.limit ?? 20;
+  const limit = Math.min(params.limit ?? 20, 100);
   const offset = (page - 1) * limit;
 
   const conditions = [];

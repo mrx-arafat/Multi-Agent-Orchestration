@@ -3,7 +3,7 @@
  * Teams are the primary isolation boundary: agents, kanban tasks,
  * and messages are all scoped to a team.
  */
-import { eq, and, isNull, sql } from 'drizzle-orm';
+import { eq, and, isNull, sql, inArray } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
 import { teams, teamMembers, agents } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
@@ -105,29 +105,21 @@ export async function listUserTeams(
   if (memberships.length === 0) return [];
 
   const teamUuids = memberships.map((m) => m.teamUuid);
-  const result: SafeTeam[] = [];
 
-  for (const uuid of teamUuids) {
-    const [team] = await db
-      .select()
-      .from(teams)
-      .where(and(eq(teams.teamUuid, uuid), isNull(teams.archivedAt)))
-      .limit(1);
+  const rows = await db
+    .select()
+    .from(teams)
+    .where(and(inArray(teams.teamUuid, teamUuids), isNull(teams.archivedAt)));
 
-    if (team) {
-      result.push({
-        teamUuid: team.teamUuid,
-        name: team.name,
-        description: team.description ?? null,
-        ownerUserUuid: team.ownerUserUuid,
-        maxAgents: team.maxAgents,
-        createdAt: team.createdAt,
-        updatedAt: team.updatedAt,
-      });
-    }
-  }
-
-  return result;
+  return rows.map((team) => ({
+    teamUuid: team.teamUuid,
+    name: team.name,
+    description: team.description ?? null,
+    ownerUserUuid: team.ownerUserUuid,
+    maxAgents: team.maxAgents,
+    createdAt: team.createdAt,
+    updatedAt: team.updatedAt,
+  }));
 }
 
 /**

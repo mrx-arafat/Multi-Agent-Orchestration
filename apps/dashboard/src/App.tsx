@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './lib/auth-context.js';
 import { ToastProvider } from './components/Toast.js';
 import { WebSocketProvider } from './lib/websocket.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { ProtectedRoute } from './components/ProtectedRoute.js';
 import { Layout } from './components/Layout.js';
 import { LoginPage } from './pages/LoginPage.js';
@@ -17,9 +18,11 @@ import { SettingsPage } from './pages/SettingsPage.js';
 import { TemplatesPage } from './pages/TemplatesPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { WorkflowEditorPage } from './pages/WorkflowEditorPage.js';
+import { NotFoundPage } from './pages/NotFoundPage.js';
 
 export function App(){
   return (
+    <ErrorBoundary>
     <AuthProvider>
     <WebSocketProvider>
     <ToastProvider>
@@ -52,11 +55,12 @@ export function App(){
 
           {/* Default redirect */}
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Routes>
       </BrowserRouter>
     </ToastProvider>
     </WebSocketProvider>
     </AuthProvider>
+    </ErrorBoundary>
   );
 }

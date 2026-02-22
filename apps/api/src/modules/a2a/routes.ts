@@ -87,7 +87,7 @@ export async function a2aRoutes(app: FastifyInstance): Promise<void> {
         jsonrpc: '2.0',
         id: body.id as string | number,
         method: body.method as string,
-        params: body.params as Record<string, unknown> | undefined,
+        ...(body.params ? { params: body.params as Record<string, unknown> } : {}),
       };
 
       const response = await handleJsonRpc(app.db, rpcRequest);

@@ -12,10 +12,10 @@ import {
   type Team,
   type Agent,
   type Invitation,
-} from '../lib/api';
-import { useAuth } from '../lib/auth-context';
-import { useToast } from '../components/Toast';
-import { ConfirmDialog } from '../components/ConfirmDialog';
+} from '../lib/api.js';
+import { useAuth } from '../lib/auth-context.js';
+import { useToast } from '../components/Toast.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 
 export function TeamDetailPage() {
   const { teamUuid } = useParams<{ teamUuid: string }>();

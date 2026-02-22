@@ -132,7 +132,7 @@ export async function validateApiToken(
   if (!user) return null;
 
   // Update lastUsedAt (best-effort, don't fail the request)
-  db.update(apiTokens)
+  await db.update(apiTokens)
     .set({ lastUsedAt: new Date() })
     .where(eq(apiTokens.tokenId, record.tokenId))
     .catch(() => {});

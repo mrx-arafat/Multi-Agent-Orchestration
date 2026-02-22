@@ -48,14 +48,49 @@ export class ApiRequestError extends Error {
   }
 }
 
+/** Whether a token refresh is currently in-flight (prevents concurrent refresh attempts) */
+let _refreshInFlight: Promise<boolean> | null = null;
+
+async function attemptTokenRefresh(): Promise<boolean> {
+  if (!_refreshToken) return false;
+
+  try {
+    const response = await fetch(`${API_BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: _refreshToken }),
+    });
+
+    if (!response.ok) return false;
+
+    const data = await response.json() as {
+      success: boolean;
+      data?: { accessToken: string; refreshToken: string };
+    };
+
+    if (data.success && data.data) {
+      setTokens(data.data.accessToken, data.data.refreshToken);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
+  _isRetry = false,
 ): Promise<T> {
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
   };
+
+  // Only set Content-Type for requests with a body
+  if (options.body) {
+    headers['Content-Type'] = headers['Content-Type'] ?? 'application/json';
+  }
 
   if (_accessToken) {
     headers['Authorization'] = `Bearer ${_accessToken}`;
@@ -66,7 +101,39 @@ async function request<T>(
     headers,
   });
 
-  const data = await response.json() as { success: boolean; data?: T; error?: ApiError };
+  // Handle 401 — try to refresh the token once
+  if (response.status === 401 && !_isRetry && _refreshToken) {
+    if (!_refreshInFlight) {
+      _refreshInFlight = attemptTokenRefresh().finally(() => {
+        _refreshInFlight = null;
+      });
+    }
+
+    const refreshed = await _refreshInFlight;
+    if (refreshed) {
+      return request<T>(path, options, true);
+    }
+
+    // Refresh failed — clear tokens and throw
+    clearTokens();
+    window.dispatchEvent(new CustomEvent('maof:session-expired'));
+    throw new ApiRequestError(401, 'SESSION_EXPIRED', 'Session expired. Please sign in again.');
+  }
+
+  // Handle non-JSON responses (502, 503, etc.)
+  let data: { success: boolean; data?: T; error?: ApiError };
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    data = await response.json() as { success: boolean; data?: T; error?: ApiError };
+  } else {
+    // Non-JSON response — wrap it in a structured error
+    const text = await response.text().catch(() => '');
+    throw new ApiRequestError(
+      response.status,
+      'SERVER_ERROR',
+      text || `Server error (HTTP ${response.status})`,
+    );
+  }
 
   if (!data.success || !response.ok) {
     throw new ApiRequestError(

@@ -70,6 +70,16 @@ export function AuthProvider({ children }: { children: ReactNode }){
     setState({ user: null, isLoading: false, isRestoring: false });
   }, []);
 
+  // Listen for session-expired events from the API client (automatic token refresh failed)
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      clearTokens();
+      setState({ user: null, isLoading: false, isRestoring: false });
+    };
+    window.addEventListener('maof:session-expired', handleSessionExpired);
+    return () => window.removeEventListener('maof:session-expired', handleSessionExpired);
+  }, []);
+
   const refreshUser = useCallback(async () => {
     try {
       const user = await getCurrentUser();

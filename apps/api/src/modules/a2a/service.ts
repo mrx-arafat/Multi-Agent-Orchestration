@@ -110,7 +110,7 @@ function toMaofTask(task: typeof kanbanTasks.$inferSelect): A2ATask {
       },
       timestamp: (task.updatedAt ?? task.createdAt).toISOString(),
     },
-    artifacts: artifacts.length > 0 ? artifacts : undefined,
+    ...(artifacts.length > 0 ? { artifacts } : {}),
   };
 }
 

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/auth-context.js';
 import { useWebSocket } from '../lib/websocket.js';
@@ -49,14 +50,23 @@ export function Layout(){
   const { user, logout } = useAuth();
   const { connected } = useWebSocket();
   const location = useLocation();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Check if current path is within a team sub-route
   const isTeamSubRoute = /^\/teams\/[^/]+\/(kanban|chat)/.test(location.pathname);
 
   return (
     <div className="flex h-screen bg-gray-50">
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-60 bg-white border-r border-gray-200 flex flex-col shadow-sm">
+      <aside className={`fixed inset-y-0 left-0 z-40 w-60 bg-white border-r border-gray-200 flex flex-col shadow-sm transform transition-transform duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="px-5 py-5 border-b border-gray-100">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
@@ -83,6 +93,7 @@ export function Layout(){
                     <NavLink
                       key={item.to}
                       to={item.to}
+                      onClick={() => setSidebarOpen(false)}
                       className={({ isActive }) =>
                         `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
                           isActive
@@ -136,7 +147,25 @@ export function Layout(){
       </aside>
 
       {/* Main content */}
-      <main className={`flex-1 overflow-auto ${isTeamSubRoute ? 'p-4' : 'p-6 lg:p-8'}`}>
+      <main className={`flex-1 overflow-auto ${isTeamSubRoute ? 'p-4' : 'p-4 lg:p-8'}`}>
+        {/* Mobile header */}
+        <div className="flex items-center gap-3 mb-4 lg:hidden">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-lg border border-gray-200 p-2 text-gray-500 hover:bg-gray-50"
+            aria-label="Open menu"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center">
+              <span className="text-xs font-black text-white">M</span>
+            </div>
+            <span className="text-sm font-bold text-gray-900">MAOF</span>
+          </div>
+        </div>
         <Outlet />
       </main>
     </div>

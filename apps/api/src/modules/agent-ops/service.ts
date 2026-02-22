@@ -6,7 +6,7 @@
  */
 import { eq, and, sql, isNull, desc } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
-import { agents, kanbanTasks, teamMembers, teams } from '../../db/schema/index.js';
+import { agents, kanbanTasks, teamMembers, teams, agentMessages } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
 import { emitTeamEvent, emitAgentEvent } from '../../lib/event-bus.js';
 
@@ -74,7 +74,7 @@ export async function getAgentContext(
     pendingTasks = taskCount?.count ?? 0;
 
     // Count unread messages
-    const { agentMessages } = await import('../../db/schema/index.js');
+  
     const [msgCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(agentMessages)
@@ -472,7 +472,7 @@ export async function broadcastMessage(
   if (!agent) throw ApiError.notFound('Agent');
   if (!agent.teamUuid) throw ApiError.badRequest('Agent is not assigned to a team');
 
-  const { agentMessages } = await import('../../db/schema/index.js');
+
   const [msg] = await db
     .insert(agentMessages)
     .values({
@@ -539,7 +539,7 @@ export async function sendDirectMessage(
     throw ApiError.badRequest('Target agent is not in your team');
   }
 
-  const { agentMessages } = await import('../../db/schema/index.js');
+
   const [msg] = await db
     .insert(agentMessages)
     .values({
@@ -594,7 +594,7 @@ export async function readInbox(
   if (!agent) throw ApiError.notFound('Agent');
   if (!agent.teamUuid) throw ApiError.badRequest('Agent is not assigned to a team');
 
-  const { agentMessages } = await import('../../db/schema/index.js');
+
   const messages = await db
     .select()
     .from(agentMessages)
@@ -790,12 +790,12 @@ export async function requestApprovalFromAgent(
   return createApprovalGate(db, {
     teamUuid: agent.teamUuid,
     title: params.title,
-    description: params.description,
-    taskUuid: params.taskUuid,
+    ...(params.description ? { description: params.description } : {}),
+    ...(params.taskUuid ? { taskUuid: params.taskUuid } : {}),
     requestedByAgentUuid: agentUuid,
-    approvers: params.approvers,
-    expiresInMs: params.expiresInMs,
-    context: params.context,
+    ...(params.approvers ? { approvers: params.approvers } : {}),
+    ...(params.expiresInMs ? { expiresInMs: params.expiresInMs } : {}),
+    ...(params.context ? { context: params.context } : {}),
   });
 }
 

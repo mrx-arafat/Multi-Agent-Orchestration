@@ -110,8 +110,9 @@ export function WebSocketProvider({ children }: { children: ReactNode }) {
       reconnectTimerRef.current = setTimeout(connect, delay);
     };
 
-    ws.onerror = () => {
-      // onclose will fire after onerror
+    ws.onerror = (event) => {
+      console.warn('[WebSocket] Connection error', event);
+      // onclose will fire after onerror and trigger reconnection
     };
   }, [dispatch]);
 

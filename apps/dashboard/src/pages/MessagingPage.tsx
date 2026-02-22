@@ -8,8 +8,8 @@ import {
   type Message,
   type Agent,
   type Team,
-} from '../lib/api';
-import { useTeamEvents, useRealtimeEvent } from '../lib/websocket';
+} from '../lib/api.js';
+import { useTeamEvents, useRealtimeEvent } from '../lib/websocket.js';
 
 const AGENT_COLORS = [
   'from-blue-500 to-blue-600',
@@ -48,15 +48,16 @@ export function MessagingPage() {
       setTeam(teamData);
       setMessages(msgData.messages.reverse());
       setAgents(agentData);
-      if (agentData.length > 0 && !fromAgentUuid && agentData[0]) {
-        setFromAgentUuid(agentData[0].agentUuid);
+      // Only set default "from" agent on initial load (when none is selected)
+      if (agentData.length > 0 && agentData[0]) {
+        setFromAgentUuid((prev) => prev || agentData[0]!.agentUuid);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load messages');
     } finally {
       setLoading(false);
     }
-  }, [teamUuid, fromAgentUuid]);
+  }, [teamUuid]);
 
   useEffect(() => { load(); }, [load]);
 

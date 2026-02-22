@@ -23,8 +23,8 @@ import {
   type KanbanTask,
   type Agent,
   type Team,
-} from '../lib/api';
-import { useToast } from '../components/Toast';
+} from '../lib/api.js';
+import { useToast } from '../components/Toast.js';
 
 const COLUMNS = [
   { key: 'backlog', label: 'Backlog', color: 'bg-slate-400', headerBg: 'bg-slate-50', ring: 'ring-slate-200' },

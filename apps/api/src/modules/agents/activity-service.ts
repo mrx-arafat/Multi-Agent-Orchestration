@@ -48,7 +48,7 @@ export async function getAgentActivity(
   }
 
   const page = params.page ?? 1;
-  const limit = params.limit ?? 20;
+  const limit = Math.min(params.limit ?? 20, 100);
   const offset = (page - 1) * limit;
 
   // Build conditions — execution logs use agentId (string), not agentUuid

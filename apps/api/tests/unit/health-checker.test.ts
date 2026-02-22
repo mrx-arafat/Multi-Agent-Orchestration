@@ -54,7 +54,7 @@ describe('checkAgentHealth', () => {
   it('should mark agent as online when health endpoint returns healthy', async () => {
     setupSelectChain([agentRow]);
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ status: 'healthy', timestamp: Date.now() }), { status: 200 }),
+      new Response(JSON.stringify({ status: 'healthy', timestamp: Date.now() }), { status: 200 }) as unknown as Response,
     );
 
     const result = await checkAgentHealth(mockDb, 'agent-uuid-1');
@@ -72,7 +72,7 @@ describe('checkAgentHealth', () => {
   it('should mark agent as degraded when health endpoint returns non-healthy status', async () => {
     setupSelectChain([agentRow]);
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ status: 'degraded', timestamp: Date.now() }), { status: 200 }),
+      new Response(JSON.stringify({ status: 'degraded', timestamp: Date.now() }), { status: 200 }) as unknown as Response,
     );
 
     const result = await checkAgentHealth(mockDb, 'agent-uuid-1');
@@ -84,7 +84,7 @@ describe('checkAgentHealth', () => {
   it('should mark agent as degraded on non-200 HTTP response', async () => {
     setupSelectChain([agentRow]);
     vi.mocked(fetch).mockResolvedValue(
-      new Response('Service Unavailable', { status: 503 }),
+      new Response('Service Unavailable', { status: 503 }) as unknown as Response,
     );
 
     const result = await checkAgentHealth(mockDb, 'agent-uuid-1');
@@ -126,7 +126,7 @@ describe('checkAgentHealth', () => {
   it('should call the correct health endpoint URL', async () => {
     setupSelectChain([{ ...agentRow, endpoint: 'https://agent.example.com/api/' }]);
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({ status: 'healthy' }), { status: 200 }),
+      new Response(JSON.stringify({ status: 'healthy' }), { status: 200 }) as unknown as Response,
     );
 
     await checkAgentHealth(mockDb, 'agent-uuid-1');

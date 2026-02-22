@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listTeams, createTeam, joinTeam, type Team } from '../lib/api';
-import { useToast } from '../components/Toast';
+import { listTeams, createTeam, joinTeam, type Team } from '../lib/api.js';
+import { useToast } from '../components/Toast.js';
 
 export function TeamsPage() {
   const navigate = useNavigate();
