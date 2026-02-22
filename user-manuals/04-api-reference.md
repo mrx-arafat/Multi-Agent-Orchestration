@@ -428,13 +428,31 @@ Create a task.
   "description": "Users can't log in with special characters in passwords",
   "priority": "high",
   "tags": ["bug", "auth"],
-  "assignedAgentUuid": "abc123-..."
+  "assignedAgentUuid": "abc123-...",
+  "dependsOn": ["upstream-task-uuid-1", "upstream-task-uuid-2"],
+  "inputMapping": {
+    "repoPath": "{{upstream-task-uuid-1.output.path}}",
+    "findings": "{{upstream-task-uuid-2.output.findings}}"
+  },
+  "outputSchema": { "type": "object", "properties": { "fixed": { "type": "boolean" } } },
+  "maxRetries": 3,
+  "timeoutMs": 60000
 }
 ```
 
 Only `title` is required. Everything else is optional.
 
 **Priority values:** `low`, `medium`, `high`, `critical`
+
+**Dependency fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `dependsOn` | uuid[] | Task UUIDs this task depends on. Task stays in `backlog` until all are `done`. |
+| `inputMapping` | object | Template object with `{{taskUuid.output.field}}` references. Resolved when all deps complete. |
+| `outputSchema` | object | JSON Schema describing the expected structured output from this task. |
+| `maxRetries` | integer | Max retry attempts on failure (0 = no retries, max 10). |
+| `timeoutMs` | integer | Timeout in milliseconds (minimum 1000). Tasks exceeding this are auto-failed. |
 
 ---
 
@@ -465,12 +483,50 @@ Update a task's status (move it between columns).
 **Body:**
 ```json
 {
-  "status": "in_progress",
-  "result": "Optional result text (useful when moving to done)"
+  "status": "done",
+  "result": "Optional result text",
+  "output": { "path": "/tmp/repo", "commit": "abc123" }
 }
 ```
 
 **Status values:** `backlog`, `todo`, `in_progress`, `review`, `done`
+
+The `output` field stores structured JSON data that downstream tasks can reference via input mappings. When a task moves to `done` with `output` set, any dependent tasks whose dependencies are now fully met are automatically promoted from `backlog` to `todo` with their input mappings resolved.
+
+---
+
+### GET /teams/:teamUuid/kanban/tasks/:taskUuid/context
+
+Get the full dependency context for a task — all upstream tasks and their outputs.
+
+**Auth:** Required
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "task": {
+      "taskUuid": "...",
+      "title": "Write summary",
+      "dependsOn": ["research-task-uuid"],
+      "inputMapping": { "source": "{{research-task-uuid.output.content}}" }
+    },
+    "upstreamTasks": [
+      {
+        "taskUuid": "research-task-uuid",
+        "title": "Research topic",
+        "status": "done",
+        "output": { "content": "AI in healthcare is..." },
+        "result": "Research complete"
+      }
+    ],
+    "resolvedInput": { "source": "AI in healthcare is..." }
+  }
+}
+```
+
+Useful for agents to understand the full context chain before starting work on a task.
 
 ---
 
@@ -957,21 +1013,88 @@ Claim and start a task.
 
 ### POST /agent-ops/agents/:uuid/tasks/:taskUuid/complete
 
-Complete a task.
+Complete a task with result and optional structured output.
 
 **Auth:** Required
 
-**Body:** `{ "result": "...", "review": false }`
+**Body:**
+```json
+{
+  "result": "Research complete — found 5 sources on AI in healthcare",
+  "review": false,
+  "output": {
+    "sources": ["source1.com", "source2.com"],
+    "wordCount": 1500,
+    "summary": "AI is transforming healthcare through..."
+  }
+}
+```
+
+- `result` — human-readable summary of the work
+- `review` — set to `true` to move to `review` instead of `done`
+- `output` — structured JSON data for downstream task consumption via input mappings
+
+When a task completes with `output`, any downstream tasks whose dependencies are now fully met are automatically promoted from `backlog` to `todo` with their input mappings resolved.
 
 ---
 
 ### POST /agent-ops/agents/:uuid/tasks/:taskUuid/fail
 
-Report a task failure.
+Report a task failure. If the task has `maxRetries > 0` and hasn't exhausted its retry count, it will be re-queued as `todo` for another attempt. Otherwise, it moves to `backlog` as a dead letter.
 
 **Auth:** Required
 
-**Body:** `{ "error": "..." }`
+**Body:** `{ "error": "Could not access the research database — connection timed out" }`
+
+The error message is stored in the task's `lastError` field. The `retryCount` is incremented on each failure.
+
+---
+
+### POST /agent-ops/agents/:uuid/tasks/:taskUuid/progress
+
+Report progress on a task. Emits a `task:progress` WebSocket event for real-time UI updates.
+
+**Auth:** Required
+
+**Body:**
+```json
+{
+  "step": 3,
+  "total": 10,
+  "message": "Analyzing source 3 of 10"
+}
+```
+
+- `step` — current step number (0+)
+- `total` — total number of steps (1+)
+- `message` — optional human-readable progress description
+
+---
+
+### POST /agent-ops/agents/:uuid/delegate
+
+Create a subtask for another agent (agent-to-agent delegation). The subtask is tagged with the required capability for auto-matching.
+
+**Auth:** Required
+
+**Body:**
+```json
+{
+  "title": "Translate research to Spanish",
+  "description": "Translate the research findings from the upstream task",
+  "capability": "text-generation",
+  "priority": "high",
+  "dependsOn": ["upstream-task-uuid"],
+  "inputMapping": { "content": "{{upstream-task-uuid.output.summary}}" },
+  "outputSchema": { "type": "object", "properties": { "translation": { "type": "string" } } },
+  "maxRetries": 2,
+  "timeoutMs": 120000
+}
+```
+
+Required fields: `title`, `capability`. Everything else is optional.
+
+The subtask is created on the delegating agent's team board. If `dependsOn` has unmet dependencies, the task starts in `backlog`; otherwise it starts in `todo`.
 
 ---
 
@@ -1050,6 +1173,208 @@ Delete a key.
 List all keys in a workflow's memory.
 
 **Auth:** Required
+
+---
+
+## Webhooks
+
+Register HTTP endpoints to receive real-time notifications when events happen in your team.
+
+### POST /teams/:teamUuid/webhooks
+
+Register a new webhook.
+
+**Auth:** Required
+
+**Body:**
+```json
+{
+  "url": "https://your-server.com/webhook",
+  "events": ["task:completed", "task:failed", "task:unblocked"],
+  "description": "Notify our monitoring system"
+}
+```
+
+Required fields: `url`, `events` (at least one event type).
+
+A signing secret is auto-generated. Each delivery includes an `X-MAOF-Signature` header containing an HMAC-SHA256 signature of the payload, so you can verify the delivery came from MAOF.
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "webhookUuid": "...",
+    "url": "https://your-server.com/webhook",
+    "secret": "whsec_...",
+    "events": ["task:completed", "task:failed", "task:unblocked"],
+    "active": true,
+    "description": "Notify our monitoring system"
+  }
+}
+```
+
+**Save the `secret`** — you'll need it to verify incoming webhook signatures.
+
+---
+
+### GET /teams/:teamUuid/webhooks
+
+List all webhooks for the team.
+
+**Auth:** Required
+
+---
+
+### PATCH /teams/:teamUuid/webhooks/:webhookUuid
+
+Update a webhook (change URL, events, active status, or description).
+
+**Auth:** Required
+
+**Body (all fields optional):**
+```json
+{
+  "url": "https://new-url.com/webhook",
+  "events": ["task:completed"],
+  "active": false,
+  "description": "Updated description"
+}
+```
+
+---
+
+### DELETE /teams/:teamUuid/webhooks/:webhookUuid
+
+Delete a webhook. Stops all future deliveries.
+
+**Auth:** Required
+
+---
+
+### GET /teams/:teamUuid/webhooks/:webhookUuid/deliveries
+
+List delivery history for a webhook. Useful for debugging failed deliveries.
+
+**Auth:** Required
+
+**Query parameters:** `limit` (1-100, default: 20)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "deliveryUuid": "...",
+      "eventType": "task:completed",
+      "status": "success",
+      "responseCode": 200,
+      "attempts": 1,
+      "createdAt": "2026-02-22T..."
+    }
+  ]
+}
+```
+
+Delivery statuses: `pending`, `success`, `failed`, `dead_letter`
+
+Failed deliveries are retried with exponential backoff (up to 5 attempts, max 1 hour between retries).
+
+---
+
+## Cost Metrics
+
+Track token usage, cost, and latency across agents and workflows.
+
+### POST /metrics
+
+Record a metric entry. Used by agents and internal systems to log execution costs.
+
+**Auth:** Required
+
+**Body:**
+```json
+{
+  "taskUuid": "...",
+  "agentUuid": "...",
+  "teamUuid": "...",
+  "workflowRunId": "...",
+  "stageId": "research",
+  "agentId": "research-bot-01",
+  "tokensUsed": 1500,
+  "promptTokens": 1000,
+  "completionTokens": 500,
+  "costCents": 3,
+  "latencyMs": 2400,
+  "queueWaitMs": 150,
+  "provider": "openai",
+  "model": "gpt-4",
+  "capability": "research",
+  "metadata": { "topic": "AI in Healthcare" }
+}
+```
+
+All fields are optional. Include whatever is relevant to the execution.
+
+---
+
+### GET /teams/:teamUuid/metrics/cost
+
+Get aggregated cost summary for a team.
+
+**Auth:** Required
+
+**Query parameters:** `days` (1-365, default: 30)
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": {
+    "totalCostCents": 450,
+    "totalTokens": 125000,
+    "totalPromptTokens": 80000,
+    "totalCompletionTokens": 45000,
+    "avgLatencyMs": 1850,
+    "executionCount": 42
+  }
+}
+```
+
+---
+
+### GET /teams/:teamUuid/metrics/agents
+
+Get per-agent cost breakdown for a team.
+
+**Auth:** Required
+
+**Query parameters:** `days` (1-365, default: 30)
+
+Returns an array of cost summaries grouped by agent.
+
+---
+
+### GET /teams/:teamUuid/metrics/daily
+
+Get daily cost time series for a team.
+
+**Auth:** Required
+
+**Query parameters:** `days` (1-365, default: 30)
+
+Returns an array of daily buckets with cost, tokens, and execution counts.
+
+---
+
+### GET /workflows/:runId/metrics
+
+Get per-stage cost breakdown for a specific workflow run.
+
+**Auth:** Required
+
+Returns cost metrics grouped by workflow stage.
 
 ---
 

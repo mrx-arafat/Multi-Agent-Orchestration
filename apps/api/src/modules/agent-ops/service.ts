@@ -273,7 +273,8 @@ export async function completeTask(
   taskUuid: string,
   result: string,
   moveToReview = false,
-): Promise<AgentTask> {
+  output?: Record<string, unknown>,
+): Promise<AgentTask & { output: unknown }> {
   const [agent] = await db
     .select({ agentUuid: agents.agentUuid, teamUuid: agents.teamUuid })
     .from(agents)
@@ -295,14 +296,17 @@ export async function completeTask(
   }
 
   const newStatus = moveToReview ? 'review' : 'done';
+  const updateValues: Record<string, unknown> = {
+    status: newStatus as 'review' | 'done',
+    result,
+    completedAt: newStatus === 'done' ? new Date() : undefined,
+    updatedAt: new Date(),
+  };
+  if (output) updateValues.output = output;
+
   const [updated] = await db
     .update(kanbanTasks)
-    .set({
-      status: newStatus as 'review' | 'done',
-      result,
-      completedAt: newStatus === 'done' ? new Date() : undefined,
-      updatedAt: new Date(),
-    })
+    .set(updateValues)
     .where(eq(kanbanTasks.taskUuid, taskUuid))
     .returning();
 
@@ -313,7 +317,14 @@ export async function completeTask(
     agentUuid,
     status: newStatus,
     result,
+    output: output ?? null,
   });
+
+  // Phase 9: Auto-trigger downstream dependent tasks
+  if (newStatus === 'done') {
+    const { processTaskCompletion } = await import('../kanban/context-resolver.js');
+    processTaskCompletion(db, taskUuid, agent.teamUuid).catch(() => {});
+  }
 
   return {
     taskUuid: updated.taskUuid,
@@ -326,18 +337,20 @@ export async function completeTask(
     assignedAgentUuid: updated.assignedAgentUuid ?? null,
     createdAt: updated.createdAt,
     startedAt: updated.startedAt ?? null,
+    output: updated.output ?? null,
   };
 }
 
 /**
- * Agent reports a task failure — sets status back to todo for reassignment.
+ * Agent reports a task failure — handles retry logic.
+ * If retries remaining, re-queues the task. Otherwise, marks as failed/dead-letter.
  */
 export async function failTask(
   db: Database,
   agentUuid: string,
   taskUuid: string,
   error: string,
-): Promise<AgentTask> {
+): Promise<AgentTask & { retryCount: number; maxRetries: number }> {
   const [agent] = await db
     .select({ agentUuid: agents.agentUuid, teamUuid: agents.teamUuid })
     .from(agents)
@@ -358,26 +371,46 @@ export async function failTask(
     throw ApiError.forbidden('Task is not assigned to you');
   }
 
-  // Release task back to todo for other agents to pick up
+  const newRetryCount = task.retryCount + 1;
+  const canRetry = newRetryCount <= task.maxRetries;
+
+  const updateValues: Record<string, unknown> = {
+    assignedAgentUuid: null,
+    retryCount: newRetryCount,
+    lastError: error,
+    updatedAt: new Date(),
+    progressCurrent: null,
+    progressTotal: null,
+    progressMessage: null,
+  };
+
+  if (canRetry) {
+    // Re-queue for another agent to pick up
+    updateValues.status = 'todo';
+    updateValues.result = `RETRY ${newRetryCount}/${task.maxRetries}: ${error}`;
+  } else {
+    // Exhausted retries — mark as done with failure info
+    updateValues.status = 'done';
+    updateValues.result = `FAILED (${newRetryCount} attempts): ${error}`;
+    updateValues.completedAt = new Date();
+  }
+
   const [updated] = await db
     .update(kanbanTasks)
-    .set({
-      status: 'todo',
-      assignedAgentUuid: null,
-      result: `FAILED by ${agentUuid}: ${error}`,
-      updatedAt: new Date(),
-    })
+    .set(updateValues)
     .where(eq(kanbanTasks.taskUuid, taskUuid))
     .returning();
 
   if (!updated) throw ApiError.internal('Failed to update task');
 
-  emitTeamEvent(agent.teamUuid, 'task:updated', {
+  emitTeamEvent(agent.teamUuid, canRetry ? 'task:retry' : 'task:dead_letter', {
     taskUuid,
     agentUuid,
-    status: 'todo',
+    status: updated.status,
     error,
-    released: true,
+    retryCount: newRetryCount,
+    maxRetries: task.maxRetries,
+    released: canRetry,
   });
 
   return {
@@ -391,6 +424,8 @@ export async function failTask(
     assignedAgentUuid: updated.assignedAgentUuid ?? null,
     createdAt: updated.createdAt,
     startedAt: updated.startedAt ?? null,
+    retryCount: newRetryCount,
+    maxRetries: task.maxRetries,
   };
 }
 
@@ -581,6 +616,138 @@ export async function readInbox(
     readAt: m.readAt ?? null,
     createdAt: m.createdAt,
   }));
+}
+
+// ── Agent Task Delegation ─────────────────────────────────────────────
+
+export interface DelegateTaskParams {
+  title: string;
+  description?: string;
+  capability: string;
+  priority?: string;
+  dependsOn?: string[];
+  inputMapping?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  maxRetries?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * Agent delegates a subtask to another agent in the team.
+ * Creates a new task with the delegating agent as creator and
+ * the required capability as a tag for matching.
+ */
+export async function delegateTask(
+  db: Database,
+  fromAgentUuid: string,
+  params: DelegateTaskParams,
+): Promise<AgentTask & { dependsOn: string[]; output: unknown }> {
+  const [agent] = await db
+    .select({ agentUuid: agents.agentUuid, teamUuid: agents.teamUuid })
+    .from(agents)
+    .where(and(eq(agents.agentUuid, fromAgentUuid), isNull(agents.deletedAt)))
+    .limit(1);
+
+  if (!agent) throw ApiError.notFound('Agent');
+  if (!agent.teamUuid) throw ApiError.badRequest('Agent is not assigned to a team');
+
+  const [created] = await db
+    .insert(kanbanTasks)
+    .values({
+      teamUuid: agent.teamUuid,
+      title: params.title,
+      description: params.description,
+      priority: (params.priority ?? 'medium') as 'low' | 'medium' | 'high' | 'critical',
+      tags: [params.capability],
+      createdByAgentUuid: fromAgentUuid,
+      dependsOn: params.dependsOn ?? [],
+      inputMapping: params.inputMapping,
+      outputSchema: params.outputSchema,
+      maxRetries: params.maxRetries ?? 0,
+      timeoutMs: params.timeoutMs,
+      status: (params.dependsOn && params.dependsOn.length > 0) ? 'backlog' : 'todo',
+    })
+    .returning();
+
+  if (!created) throw ApiError.internal('Failed to delegate task');
+
+  emitTeamEvent(agent.teamUuid, 'task:delegated', {
+    taskUuid: created.taskUuid,
+    fromAgentUuid,
+    capability: params.capability,
+    dependsOn: params.dependsOn ?? [],
+  });
+
+  return {
+    taskUuid: created.taskUuid,
+    teamUuid: created.teamUuid,
+    title: created.title,
+    description: created.description ?? null,
+    status: created.status,
+    priority: created.priority,
+    tags: created.tags,
+    assignedAgentUuid: created.assignedAgentUuid ?? null,
+    createdAt: created.createdAt,
+    startedAt: created.startedAt ?? null,
+    dependsOn: created.dependsOn,
+    output: created.output ?? null,
+  };
+}
+
+// ── Agent Progress Streaming ──────────────────────────────────────────
+
+/**
+ * Agent reports progress on a task — step N/M with optional message.
+ * Emits a WebSocket event for real-time UI updates.
+ */
+export async function updateTaskProgress(
+  db: Database,
+  agentUuid: string,
+  taskUuid: string,
+  step: number,
+  total: number,
+  message?: string,
+): Promise<{ taskUuid: string; step: number; total: number; message: string | null }> {
+  const [agent] = await db
+    .select({ agentUuid: agents.agentUuid, teamUuid: agents.teamUuid })
+    .from(agents)
+    .where(and(eq(agents.agentUuid, agentUuid), isNull(agents.deletedAt)))
+    .limit(1);
+
+  if (!agent) throw ApiError.notFound('Agent');
+  if (!agent.teamUuid) throw ApiError.badRequest('Agent is not assigned to a team');
+
+  const [task] = await db
+    .select()
+    .from(kanbanTasks)
+    .where(and(eq(kanbanTasks.taskUuid, taskUuid), eq(kanbanTasks.teamUuid, agent.teamUuid)))
+    .limit(1);
+
+  if (!task) throw ApiError.notFound('Task');
+  if (task.assignedAgentUuid !== agentUuid) {
+    throw ApiError.forbidden('Task is not assigned to you');
+  }
+
+  await db
+    .update(kanbanTasks)
+    .set({
+      progressCurrent: step,
+      progressTotal: total,
+      progressMessage: message ?? null,
+      updatedAt: new Date(),
+    })
+    .where(eq(kanbanTasks.taskUuid, taskUuid));
+
+  emitTeamEvent(agent.teamUuid, 'task:progress', {
+    taskUuid,
+    agentUuid,
+    step,
+    total,
+    message: message ?? null,
+    percent: total > 0 ? Math.round((step / total) * 100) : 0,
+  });
+
+  return { taskUuid, step, total, message: message ?? null };
 }
 
 // ── Agent Status Reporting ────────────────────────────────────────────

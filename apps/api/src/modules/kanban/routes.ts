@@ -16,6 +16,7 @@ import {
   updateTaskStatus,
   getBoardSummary,
 } from './service.js';
+import { getTaskDependencyContext } from './context-resolver.js';
 import { assertTeamMember } from '../teams/service.js';
 
 const teamUuidParam = {
@@ -53,6 +54,12 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
             assignedAgentUuid: { type: 'string', format: 'uuid' },
             parentTaskUuid: { type: 'string', format: 'uuid' },
             stageId: { type: 'string' },
+            // Phase 9: Context Store & Dependencies
+            dependsOn: { type: 'array', items: { type: 'string', format: 'uuid' }, default: [] },
+            inputMapping: { type: 'object' },
+            outputSchema: { type: 'object' },
+            maxRetries: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
+            timeoutMs: { type: 'integer', minimum: 1000 },
           },
         },
       },
@@ -71,6 +78,11 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
         assignedAgentUuid?: string;
         parentTaskUuid?: string;
         stageId?: string;
+        dependsOn?: string[];
+        inputMapping?: Record<string, unknown>;
+        outputSchema?: Record<string, unknown>;
+        maxRetries?: number;
+        timeoutMs?: number;
       };
 
       const task = await createTask(app.db, {
@@ -160,6 +172,7 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
           properties: {
             status: { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'review', 'done'] },
             result: { type: 'string', maxLength: 10000 },
+            output: { type: 'object' },
           },
         },
       },
@@ -169,8 +182,8 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
       const { teamUuid, taskUuid } = request.params as { teamUuid: string; taskUuid: string };
       await assertTeamMember(app.db, teamUuid, request.user.sub);
 
-      const { status, result } = request.body as { status: string; result?: string };
-      const task = await updateTaskStatus(app.db, taskUuid, teamUuid, status, result);
+      const { status, result, output } = request.body as { status: string; result?: string; output?: Record<string, unknown> };
+      const task = await updateTaskStatus(app.db, taskUuid, teamUuid, status, result, output);
       return reply.send({ success: true, data: task });
     },
   );
@@ -188,6 +201,22 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
 
       const summary = await getBoardSummary(app.db, teamUuid);
       return reply.send({ success: true, data: summary });
+    },
+  );
+
+  // GET /teams/:teamUuid/kanban/tasks/:taskUuid/context — Phase 9: dependency context
+  app.get(
+    '/teams/:teamUuid/kanban/tasks/:taskUuid/context',
+    {
+      schema: { params: taskUuidParam },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { teamUuid, taskUuid } = request.params as { teamUuid: string; taskUuid: string };
+      await assertTeamMember(app.db, teamUuid, request.user.sub);
+
+      const context = await getTaskDependencyContext(app.db, taskUuid);
+      return reply.send({ success: true, data: context });
     },
   );
 }

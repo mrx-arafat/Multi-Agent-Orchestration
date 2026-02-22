@@ -155,10 +155,11 @@ Teams:
   POST /teams/:teamUuid/agents                      → Add agent to team (body: {agentUuid})
 
 Kanban Tasks:
-  POST /teams/:teamUuid/kanban/tasks                → Create task (body: {title, description?, priority?, tags?, assignedAgentUuid?})
+  POST /teams/:teamUuid/kanban/tasks                → Create task (body: {title, description?, priority?, tags?, assignedAgentUuid?, dependsOn?, inputMapping?, outputSchema?, maxRetries?, timeoutMs?})
   GET /teams/:teamUuid/kanban/tasks                 → List tasks (?status=backlog|todo|in_progress|review|done&tag=x&page=1&limit=50)
-  PATCH /teams/:teamUuid/kanban/tasks/:taskUuid/status → Update status (body: {status, result?})
+  PATCH /teams/:teamUuid/kanban/tasks/:taskUuid/status → Update status (body: {status, result?, output?})
   POST /teams/:teamUuid/kanban/tasks/:taskUuid/claim   → Assign to agent (body: {agentUuid})
+  GET /teams/:teamUuid/kanban/tasks/:taskUuid/context  → Get dependency context (upstream outputs + resolved inputs)
   GET /teams/:teamUuid/kanban/summary               → Task counts by status
 
 Workflows:
@@ -182,6 +183,20 @@ Notifications:
   GET /notifications                                → List notifications (?unreadOnly=true)
   POST /notifications/read-all                      → Mark all read
 
+Webhooks:
+  POST /teams/:teamUuid/webhooks                    → Register webhook (body: {url, events[], description?})
+  GET /teams/:teamUuid/webhooks                     → List team webhooks
+  PATCH /teams/:teamUuid/webhooks/:webhookUuid      → Update webhook (body: {url?, events?, active?, description?})
+  DELETE /teams/:teamUuid/webhooks/:webhookUuid      → Delete webhook
+  GET /teams/:teamUuid/webhooks/:webhookUuid/deliveries → Delivery history (?limit=20)
+
+Cost Metrics:
+  POST /metrics                                     → Record metric (body: {taskUuid?, agentUuid?, teamUuid?, tokensUsed?, costCents?, latencyMs?, provider?, model?})
+  GET /teams/:teamUuid/metrics/cost                 → Team cost summary (?days=30)
+  GET /teams/:teamUuid/metrics/agents               → Per-agent cost breakdown (?days=30)
+  GET /teams/:teamUuid/metrics/daily                → Daily cost time-series (?days=30)
+  GET /workflows/:runId/metrics                     → Workflow cost breakdown
+
 WORKFLOW STAGES FORMAT:
 Each stage in a workflow has:
   - id: unique identifier (string)
@@ -190,6 +205,10 @@ Each stage in a workflow has:
   - dependsOn: array of stage IDs this stage waits for (optional)
 
 Stages without dependsOn run in parallel.
+
+TASK DEPENDENCIES (Context Chaining):
+Tasks can depend on other tasks via "dependsOn" (array of task UUIDs). Dependent tasks stay in backlog until all upstream tasks are done. Use "inputMapping" with templates like {{taskUuid.output.fieldName}} to pass data between tasks.
+When moving a task to "done", include "output" (JSON object) alongside "result" (text) so downstream tasks can consume structured data.
 
 BEHAVIOR:
 1. Verify connection with GET /auth/me on first use
@@ -200,6 +219,8 @@ BEHAVIOR:
 6. Workflows are async — after execute, poll GET /workflows/:runId until status is "completed"
 7. Priority values: low, medium, high, critical
 8. Status values: backlog, todo, in_progress, review, done
+9. When creating task chains, use dependsOn to wire dependencies and inputMapping to pass data
+10. Use GET .../tasks/:taskUuid/context to inspect dependency graph before starting dependent tasks
 ```
 
 ---
@@ -262,6 +283,48 @@ BEHAVIOR:
 1. GET /notifications?unreadOnly=true
 2. If none: "No unread notifications"
 3. If some: list them, offer to mark all read
+```
+
+### "Create a task chain where A feeds into B"
+
+```
+1. GET /teams → get teamUuid
+2. POST /teams/:teamUuid/kanban/tasks → create task A (e.g., research)
+3. Note task A's UUID from the response
+4. POST /teams/:teamUuid/kanban/tasks → create task B with:
+   {
+     "title": "Write article",
+     "dependsOn": ["<task-A-uuid>"],
+     "inputMapping": { "researchData": "{{<task-A-uuid>.output.findings}}" }
+   }
+5. Confirm: "Created task chain: 'Research' → 'Write article'. Task B will auto-start when A completes."
+```
+
+### "Set up a webhook for task notifications"
+
+```
+1. GET /teams → get teamUuid
+2. POST /teams/:teamUuid/webhooks with:
+   { "url": "https://user-server.com/webhook", "events": ["task:completed", "task:failed"] }
+3. Save the secret from the response
+4. Confirm: "Webhook registered. Deliveries will be signed with the secret. Save it for verification."
+```
+
+### "How much have my agents cost this month?"
+
+```
+1. GET /teams → get teamUuid
+2. GET /teams/:teamUuid/metrics/cost?days=30
+3. Format: "Total cost: $X.XX, Total tokens: N, Average latency: Nms, Executions: N"
+4. Optionally: GET /teams/:teamUuid/metrics/agents for per-agent breakdown
+```
+
+### "Show webhook delivery history"
+
+```
+1. GET /teams/:teamUuid/webhooks → list webhooks
+2. GET /teams/:teamUuid/webhooks/:webhookUuid/deliveries
+3. Format as a table: event type, status, response code, attempts, timestamp
 ```
 
 ---

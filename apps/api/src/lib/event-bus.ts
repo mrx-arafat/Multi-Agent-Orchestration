@@ -1,7 +1,7 @@
 /**
  * In-process event bus for broadcasting real-time events.
  * Services emit events here; the WebSocket plugin subscribes and
- * forwards them to connected clients.
+ * forwards them to connected clients. Phase 9 adds webhook delivery.
  */
 import { EventEmitter } from 'node:events';
 
@@ -45,4 +45,24 @@ export function emitUserEvent(
   payload: Record<string, unknown>,
 ): void {
   eventBus.emit({ channel: `user:${userUuid}`, type, payload });
+}
+
+// ── Phase 9: Webhook delivery integration ─────────────────────────────
+
+/**
+ * Registers a webhook delivery handler that fires on team events.
+ * Called once during app startup when database is available.
+ */
+export function registerWebhookDelivery(
+  deliverFn: (teamUuid: string, eventType: string, payload: Record<string, unknown>) => Promise<void>,
+): void {
+  eventBus.on((event) => {
+    // Only deliver webhooks for team-channel events
+    if (event.channel.startsWith('team:')) {
+      const teamUuid = event.channel.replace('team:', '');
+      deliverFn(teamUuid, event.type, event.payload).catch(() => {
+        // Best-effort webhook delivery — don't crash the event bus
+      });
+    }
+  });
 }

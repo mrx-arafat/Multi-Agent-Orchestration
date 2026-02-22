@@ -1,6 +1,6 @@
 # MAOF Development Status
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-22 (Phase 9 added)
 
 ## Completed Phases
 
@@ -121,17 +121,17 @@
 
 | Metric | Count |
 |--------|-------|
-| API Endpoints | 72 |
-| Database Tables | 13 |
+| API Endpoints | 86 |
+| Database Tables | 16 |
 | Frontend Pages | 13 |
 | Frontend Components | 3 (ConfirmDialog, NotificationBell, Toast) |
-| Service Modules | 18 |
-| Service Functions | 120+ |
+| Service Modules | 21 |
+| Service Functions | 140+ |
 | AI Capabilities | 17 |
 | AI Providers | 3 (OpenAI, Anthropic, Google) |
-| Integration Test Suites | 12 |
-| Unit Test Suites | 5 |
-| Total Tests | 158 |
+| Integration Test Suites | 13 |
+| Unit Test Suites | 6 |
+| Total Tests | 179 |
 
 ## Key Architecture Decisions
 
@@ -181,6 +181,20 @@
 
 23. **Profile updates via auth context** — After profile edits, `refreshUser()` re-fetches from `/auth/me` and updates React context. All components consuming `useAuth()` reflect the change immediately without page reload.
 
+24. **Task dependency graph (Phase 9)** — Kanban tasks support `dependsOn` (UUID array) for DAG-style dependency chains. The context resolver uses Handlebars-style template syntax `{{taskUuid.output.field}}` for `inputMapping`, resolving upstream task outputs into downstream task inputs. When a task completes, `processTaskCompletion()` checks if downstream tasks are fully unblocked and auto-promotes them from `backlog` to `todo`.
+
+25. **Structured typed output (Phase 9)** — Tasks produce a JSONB `output` field alongside the legacy text `result`. The `output` field enables structured context passing between agents (e.g., `{type: "code_review", findings: [...], score: 7.5}`). This is the primary vehicle for agent-to-agent data flow.
+
+26. **Agent-to-agent delegation (Phase 9)** — The `POST /agent-ops/agents/:uuid/delegate` endpoint enables A2A task creation. The delegating agent specifies a required capability which becomes the task tag, enabling capability-based routing. Delegated tasks support the full dependency/context chain.
+
+27. **Retry with dead letter (Phase 9)** — Each task has configurable `maxRetries`. On failure, `retryCount` increments and the task is re-queued (`todo`, unassigned) for another agent. When retries are exhausted, the task moves to `done` with failure details — acting as a dead letter. The timeout checker handles stale `in_progress` tasks similarly.
+
+28. **Webhook delivery with HMAC signing (Phase 9)** — Webhook payloads are signed with HMAC-SHA256 using a per-webhook secret (`X-MAOF-Signature` header). Deliveries are tracked in `webhook_deliveries` with exponential backoff retry (up to 5 attempts, max 1 hour backoff). Dead-lettered deliveries are preserved for debugging.
+
+29. **Event-driven webhook integration (Phase 9)** — `registerWebhookDelivery()` attaches a listener to the event bus. All team-channel events (task:*, workflow:*, message:*) automatically trigger webhook delivery to matching subscribers. This keeps the webhook layer decoupled from business logic.
+
+30. **Cost attribution (Phase 9)** — The `task_metrics` table records token usage, cost (in cents for integer precision), latency, provider, and model per execution. Aggregation queries support team summary, per-agent breakdown, daily time-series, and per-workflow drill-down.
+
 ### Phase 6 — Agent Operations Protocol (Complete)
 - [x] **Agent protocol endpoint** — `GET /agent-ops/protocol` returns machine-readable operating instructions (no auth required)
 - [x] **9-step agent lifecycle** — Register → Join Team → Discover Work → Claim → Execute → Report → Communicate → Check Inbox → Health Response
@@ -205,7 +219,20 @@
 - [x] **Backward compatible** — Existing sequential workflows execute identically; `progress.current` still works
 - [x] **Database fix** — Fixed `api_tokens.token_prefix` column size (varchar(12) → varchar(16))
 
-## What's Next — Phase 9 Priorities
+### Phase 9 — Agent-Native Infrastructure (Complete)
+- [x] **Context Store & Task Dependencies** — Tasks support `dependsOn` (UUID array) for dependency graphs and `inputMapping` (Handlebars-style `{{taskUuid.output.field}}`) for context chaining between tasks
+- [x] **Structured Task Output** — Tasks produce typed JSONB `output` in addition to text `result`. Output flows through dependency chains via template resolution
+- [x] **Auto-Dependency Resolution** — When upstream tasks complete, downstream blocked tasks are automatically promoted from `backlog` to `todo` with resolved input context
+- [x] **Task Dependency Context API** — `GET /teams/:teamUuid/kanban/tasks/:taskUuid/context` returns full upstream outputs and resolved input mappings
+- [x] **Agent-to-Agent Task Delegation** — `POST /agent-ops/agents/:uuid/delegate` lets agents create subtasks for other agents, tagged with required capabilities for auto-matching
+- [x] **Streaming Progress** — `POST /agent-ops/agents/:uuid/tasks/:taskUuid/progress` reports step N/M with message; emits real-time WebSocket `task:progress` events
+- [x] **Task Retry with Dead Letter** — Configurable `maxRetries` per task. Failed tasks re-queue for other agents until retries exhausted, then move to dead-letter (`done` with failure info)
+- [x] **Task Timeout Enforcement** — Configurable `timeoutMs` per task. Stale `in_progress` tasks auto-detected and handled (retry or dead-letter)
+- [x] **Webhook Notifications** — CRUD for webhook registrations (`/teams/:teamUuid/webhooks`). Events auto-delivered via HMAC-SHA256 signed HTTP POST with exponential backoff retry. Delivery history tracking
+- [x] **Cost Tracking & Metrics** — `task_metrics` table records tokens, cost, latency per execution. API endpoints for team cost summary, per-agent breakdown, daily time-series, per-workflow breakdown
+- [x] **Event-Driven Webhook Delivery** — All team events (task:created, task:completed, workflow:failed, etc.) auto-trigger matching webhook deliveries via event bus integration
+
+## What's Next — Phase 10 Priorities
 
 ### High Priority
 - [ ] **File attachments** — Attach files to Kanban tasks and messages
@@ -235,7 +262,7 @@
 | Auth | `service.ts`, `api-token-service.ts` | `routes.ts` |
 | Agents | `service.ts`, `activity-service.ts`, `router.ts` | `routes.ts` |
 | Teams | `service.ts`, `invitation-service.ts` | `routes.ts` |
-| Kanban | `service.ts` | `routes.ts` |
+| Kanban | `service.ts`, `context-resolver.ts`, `timeout-checker.ts` | `routes.ts` |
 | Messaging | `service.ts` | `routes.ts` |
 | Workflows | `service.ts`, `validator.ts` | `routes.ts` |
 | Memory | `service.ts` | `routes.ts` |
@@ -245,6 +272,8 @@
 | Built-in Agents | `executor.ts`, `capability-prompts.ts`, `seed.ts` | `routes.ts` |
 | Analytics | `service.ts` | `routes.ts` |
 | Agent Ops | `service.ts`, `protocol.ts` | `routes.ts` |
+| Webhooks | `service.ts` | `routes.ts` |
+| Metrics | `service.ts` | `routes.ts` |
 
 ### Backend Infrastructure
 | Module | File | Purpose |
@@ -269,6 +298,9 @@
 | api_tokens | `api-tokens.ts` | — |
 | workflow_templates | `workflow-templates.ts` | — |
 | notifications | `notifications.ts` | notification_type (6 values) |
+| webhooks | `webhooks.ts` | — |
+| webhook_deliveries | `webhooks.ts` | webhook_delivery_status (4 values) |
+| task_metrics | `task-metrics.ts` | — |
 
 ### Frontend Pages
 | Page | File | Key Libraries |

@@ -23,7 +23,8 @@ export function createTestPool(): Pool {
  */
 export async function truncateAllTables(pool: Pool): Promise<void> {
   await pool.query(`
-    TRUNCATE TABLE agent_messages, kanban_tasks, team_members, teams,
+    TRUNCATE TABLE webhook_deliveries, webhooks, task_metrics,
+                   agent_messages, kanban_tasks, team_members, teams,
                    execution_logs, stage_executions, workflow_runs, agents, api_tokens, users
     RESTART IDENTITY CASCADE
   `);

@@ -50,6 +50,13 @@
       "when": 1771588692082,
       "tag": "0006_lowly_quentin_quire",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1771732959251,
+      "tag": "0007_lyrical_proudstar",
+      "breakpoints": true
     }
   ]
 }

@@ -18,6 +18,8 @@ export default defineConfig({
     './src/db/schema/team-invitations.ts',
     './src/db/schema/workflow-templates.ts',
     './src/db/schema/notifications.ts',
+    './src/db/schema/webhooks.ts',
+    './src/db/schema/task-metrics.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

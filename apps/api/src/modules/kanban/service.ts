@@ -10,6 +10,7 @@ import { kanbanTasks, agents } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
 import { assertTeamMember } from '../teams/service.js';
 import { emitTeamEvent } from '../../lib/event-bus.js';
+import { processTaskCompletion } from './context-resolver.js';
 
 export interface SafeKanbanTask {
   taskUuid: string;
@@ -26,6 +27,20 @@ export interface SafeKanbanTask {
   parentTaskUuid: string | null;
   stageId: string | null;
   result: string | null;
+  // Phase 9: Context Store & Dependencies
+  dependsOn: string[];
+  inputMapping: unknown | null;
+  output: unknown | null;
+  outputSchema: unknown | null;
+  // Phase 9: Retry & Timeout
+  maxRetries: number;
+  retryCount: number;
+  timeoutMs: number | null;
+  lastError: string | null;
+  // Phase 9: Streaming Progress
+  progressCurrent: number | null;
+  progressTotal: number | null;
+  progressMessage: string | null;
   createdAt: Date;
   updatedAt: Date;
   startedAt: Date | null;
@@ -48,6 +63,17 @@ function toSafe(task: typeof kanbanTasks.$inferSelect): SafeKanbanTask {
     parentTaskUuid: task.parentTaskUuid ?? null,
     stageId: task.stageId ?? null,
     result: task.result ?? null,
+    dependsOn: task.dependsOn,
+    inputMapping: task.inputMapping ?? null,
+    output: task.output ?? null,
+    outputSchema: task.outputSchema ?? null,
+    maxRetries: task.maxRetries,
+    retryCount: task.retryCount,
+    timeoutMs: task.timeoutMs ?? null,
+    lastError: task.lastError ?? null,
+    progressCurrent: task.progressCurrent ?? null,
+    progressTotal: task.progressTotal ?? null,
+    progressMessage: task.progressMessage ?? null,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
     startedAt: task.startedAt ?? null,
@@ -71,8 +97,18 @@ export async function createTask(
     createdByAgentUuid?: string;
     parentTaskUuid?: string;
     stageId?: string;
+    // Phase 9 fields
+    dependsOn?: string[];
+    inputMapping?: Record<string, unknown>;
+    outputSchema?: Record<string, unknown>;
+    maxRetries?: number;
+    timeoutMs?: number;
   },
 ): Promise<SafeKanbanTask> {
+  // If task has unresolved dependencies, start as 'backlog'; otherwise 'backlog' (default)
+  // Tasks with dependsOn will be auto-promoted to 'todo' when deps complete
+  const initialStatus = (params.dependsOn && params.dependsOn.length > 0) ? 'backlog' : 'backlog';
+
   const [created] = await db
     .insert(kanbanTasks)
     .values({
@@ -86,7 +122,12 @@ export async function createTask(
       createdByAgentUuid: params.createdByAgentUuid,
       parentTaskUuid: params.parentTaskUuid,
       stageId: params.stageId,
-      status: 'backlog',
+      status: initialStatus,
+      dependsOn: params.dependsOn ?? [],
+      inputMapping: params.inputMapping,
+      outputSchema: params.outputSchema,
+      maxRetries: params.maxRetries ?? 0,
+      timeoutMs: params.timeoutMs,
     })
     .returning();
 
@@ -206,6 +247,7 @@ export async function updateTaskStatus(
   teamUuid: string,
   status: string,
   result?: string,
+  output?: Record<string, unknown>,
 ): Promise<SafeKanbanTask> {
   const updates: Record<string, unknown> = {
     status,
@@ -218,6 +260,7 @@ export async function updateTaskStatus(
   if (status === 'done') {
     updates.completedAt = new Date();
     if (result) updates.result = result;
+    if (output) updates.output = output;
   }
 
   const [updated] = await db
@@ -229,6 +272,14 @@ export async function updateTaskStatus(
   if (!updated) throw ApiError.notFound('Task');
   const safe = toSafe(updated);
   emitTeamEvent(teamUuid, 'task:updated', safe as unknown as Record<string, unknown>);
+
+  // Phase 9: When a task completes, check and unblock downstream dependent tasks
+  if (status === 'done') {
+    processTaskCompletion(db, taskUuid, teamUuid).catch(() => {
+      // Best-effort: don't fail the status update if dependency resolution fails
+    });
+  }
+
   return safe;
 }
 

@@ -59,6 +59,17 @@ Backlog → Todo → In Progress → Review → Done
 
 Tasks have a title, description, priority (low/medium/high/critical), tags, and can be assigned to agents.
 
+Tasks also support **dependency chains** — a task can declare that it depends on other tasks. When all upstream tasks are complete, the dependent task is automatically promoted from `backlog` to `todo`. Upstream task outputs are injected into the downstream task via **input mappings** using template syntax like `{{taskUuid.output.fieldName}}`.
+
+### Structured Output
+When an agent completes a task, it can attach a **structured JSON output** alongside the text result. This output is stored on the task and made available to downstream tasks through input mappings. This enables typed data flow between agents — one agent produces a JSON object, another consumes specific fields from it.
+
+### Webhooks
+Teams can register **webhook endpoints** that receive HTTP POST notifications when events occur (task completions, status changes, etc.). Each delivery is signed with HMAC-SHA256 so receivers can verify authenticity. Failed deliveries are retried with exponential backoff.
+
+### Cost Tracking
+Every agent execution can record **token usage, cost, and latency metrics**. These are stored per-task and per-workflow, and can be queried as team summaries, per-agent breakdowns, or daily time series. This gives visibility into how much each agent and workflow costs to run.
+
 ### Workflows
 A workflow chains multiple agents together in stages. Each stage requires an agent capability. Stages can run in parallel (if independent) or sequentially (if one depends on another's output).
 
@@ -101,7 +112,7 @@ When a workflow stage needs to run, MAOF "dispatches" the task to an agent. Ther
 
 ## Database Structure
 
-13 tables organized by module:
+16 tables organized by module:
 
 | Module | Tables |
 |--------|--------|
@@ -113,6 +124,8 @@ When a workflow stage needs to run, MAOF "dispatches" the task to an agent. Ther
 | **Workflows** | `workflow_runs`, `stage_executions`, `execution_logs` |
 | **Templates** | `workflow_templates` |
 | **Notifications** | `notifications` |
+| **Webhooks** | `webhooks`, `webhook_deliveries` |
+| **Metrics** | `task_metrics` |
 
 ## Directory Structure
 
@@ -124,7 +137,7 @@ Multi-Agent-Orchestration/
 │   │   │   ├── config/       # Environment validation
 │   │   │   ├── db/           # Database schema + migrations
 │   │   │   ├── lib/          # AI providers, event bus, utilities
-│   │   │   ├── modules/      # Feature modules (auth, agents, kanban, etc.)
+│   │   │   ├── modules/      # Feature modules (auth, agents, kanban, webhooks, metrics, etc.)
 │   │   │   ├── plugins/      # Fastify plugins (auth, websocket)
 │   │   │   └── queue/        # BullMQ workflow worker
 │   │   ├── drizzle/          # SQL migration files

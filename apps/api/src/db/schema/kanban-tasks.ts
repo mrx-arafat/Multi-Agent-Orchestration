@@ -5,6 +5,7 @@ import {
   varchar,
   text,
   integer,
+  jsonb,
   pgEnum,
   timestamp,
   index,
@@ -47,7 +48,25 @@ export const kanbanTasks = pgTable('kanban_tasks', {
   stageId: varchar('stage_id', { length: 255 }), // Link to workflow stage (optional)
   estimatedMs: integer('estimated_ms'), // Estimated time to complete
   actualMs: integer('actual_ms'), // Actual time taken
-  result: text('result'), // Output/result when done
+  result: text('result'), // Output/result when done (legacy text)
+
+  // ── Phase 9: Context Store & Dependencies ────────────────────────────
+  dependsOn: uuid('depends_on').array().notNull().default([]), // Task UUIDs this task depends on
+  inputMapping: jsonb('input_mapping'), // Template: {"repoPath": "{{task-uuid.output.path}}"}
+  output: jsonb('output'), // Structured typed output (preferred over text result)
+  outputSchema: jsonb('output_schema'), // Expected output shape for validation
+
+  // ── Phase 9: Retry & Timeout ─────────────────────────────────────────
+  maxRetries: integer('max_retries').notNull().default(0),
+  retryCount: integer('retry_count').notNull().default(0),
+  timeoutMs: integer('timeout_ms'), // Task-level timeout; null = no timeout
+  lastError: text('last_error'), // Most recent failure reason
+
+  // ── Phase 9: Streaming Progress ──────────────────────────────────────
+  progressCurrent: integer('progress_current'), // Current step (e.g., 3)
+  progressTotal: integer('progress_total'), // Total steps (e.g., 5)
+  progressMessage: text('progress_message'), // "Running security scan..."
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   startedAt: timestamp('started_at'),
@@ -56,6 +75,7 @@ export const kanbanTasks = pgTable('kanban_tasks', {
   index('idx_kanban_tasks_team_uuid').on(table.teamUuid),
   index('idx_kanban_tasks_status').on(table.status),
   index('idx_kanban_tasks_assigned_agent').on(table.assignedAgentUuid),
+  index('idx_kanban_tasks_depends_on').on(table.dependsOn),
 ]);
 
 export type KanbanTask = typeof kanbanTasks.$inferSelect;

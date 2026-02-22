@@ -27,6 +27,8 @@ import {
   sendDirectMessage,
   readInbox,
   reportStatus,
+  delegateTask,
+  updateTaskProgress,
 } from './service.js';
 
 const agentParamSchema = {
@@ -130,7 +132,7 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
   /**
    * POST /agent-ops/agents/:uuid/tasks/:taskUuid/complete
    * Agent completes a task with its result.
-   * Body: { result: string, review?: boolean }
+   * Body: { result: string, review?: boolean, output?: object }
    */
   app.post(
     '/agent-ops/agents/:uuid/tasks/:taskUuid/complete',
@@ -143,6 +145,7 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
           properties: {
             result: { type: 'string', minLength: 1 },
             review: { type: 'boolean', default: false },
+            output: { type: 'object' },
           },
         },
       },
@@ -150,8 +153,8 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
     },
     async (request, reply) => {
       const { uuid, taskUuid } = request.params as { uuid: string; taskUuid: string };
-      const { result, review } = request.body as { result: string; review?: boolean };
-      const task = await completeTask(app.db, uuid, taskUuid, result, review);
+      const { result, review, output } = request.body as { result: string; review?: boolean; output?: Record<string, unknown> };
+      const task = await completeTask(app.db, uuid, taskUuid, result, review, output);
       return reply.send({ success: true, data: task });
     },
   );
@@ -303,6 +306,86 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
       const { uuid } = request.params as { uuid: string };
       const { status, details } = request.body as { status: 'online' | 'degraded' | 'offline'; details?: string };
       const result = await reportStatus(app.db, uuid, status, details);
+      return reply.send({ success: true, data: result });
+    },
+  );
+
+  // ── Phase 9: Agent Task Delegation ────────────────────────────────────
+
+  /**
+   * POST /agent-ops/agents/:uuid/delegate
+   * Agent creates a subtask for another agent (A2A delegation).
+   * The subtask is tagged with the required capability for auto-matching.
+   */
+  app.post(
+    '/agent-ops/agents/:uuid/delegate',
+    {
+      schema: {
+        ...agentParamSchema,
+        body: {
+          type: 'object',
+          required: ['title', 'capability'],
+          properties: {
+            title: { type: 'string', minLength: 1, maxLength: 500 },
+            description: { type: 'string', maxLength: 4096 },
+            capability: { type: 'string', minLength: 1 },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], default: 'medium' },
+            dependsOn: { type: 'array', items: { type: 'string', format: 'uuid' }, default: [] },
+            inputMapping: { type: 'object' },
+            outputSchema: { type: 'object' },
+            maxRetries: { type: 'integer', minimum: 0, maximum: 10, default: 0 },
+            timeoutMs: { type: 'integer', minimum: 1000 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { uuid } = request.params as { uuid: string };
+      const body = request.body as {
+        title: string;
+        description?: string;
+        capability: string;
+        priority?: string;
+        dependsOn?: string[];
+        inputMapping?: Record<string, unknown>;
+        outputSchema?: Record<string, unknown>;
+        maxRetries?: number;
+        timeoutMs?: number;
+      };
+      const task = await delegateTask(app.db, uuid, body);
+      return reply.status(201).send({ success: true, data: task });
+    },
+  );
+
+  // ── Phase 9: Agent Progress Streaming ─────────────────────────────────
+
+  /**
+   * POST /agent-ops/agents/:uuid/tasks/:taskUuid/progress
+   * Agent reports progress on a task (step N/M with message).
+   * Emits real-time WebSocket event for live UI updates.
+   */
+  app.post(
+    '/agent-ops/agents/:uuid/tasks/:taskUuid/progress',
+    {
+      schema: {
+        ...agentTaskParamSchema,
+        body: {
+          type: 'object',
+          required: ['step', 'total'],
+          properties: {
+            step: { type: 'integer', minimum: 0 },
+            total: { type: 'integer', minimum: 1 },
+            message: { type: 'string', maxLength: 1000 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { uuid, taskUuid } = request.params as { uuid: string; taskUuid: string };
+      const { step, total, message } = request.body as { step: number; total: number; message?: string };
+      const result = await updateTaskProgress(app.db, uuid, taskUuid, step, total, message);
       return reply.send({ success: true, data: result });
     },
   );
