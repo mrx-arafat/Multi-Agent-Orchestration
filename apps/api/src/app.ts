@@ -30,6 +30,14 @@ import { approvalRoutes } from './modules/approvals/routes.js';
 import { a2aRoutes } from './modules/a2a/routes.js';
 import { registerWebhookDelivery } from './lib/event-bus.js';
 import { deliverWebhookEvent } from './modules/webhooks/service.js';
+// Phase 10: Enterprise features
+import { agentMemoryRoutes } from './modules/agent-memory/routes.js';
+import { conflictResolutionRoutes } from './modules/conflict-resolution/routes.js';
+import { sandboxRoutes } from './modules/sandbox/routes.js';
+import { budgetRoutes } from './modules/budgets/routes.js';
+import { agentPermissionRoutes } from './modules/agent-permissions/routes.js';
+import { agentVersionRoutes } from './modules/agent-versions/routes.js';
+import { resultCacheRoutes } from './modules/result-cache/routes.js';
 
 // Type augmentations are in the database plugin
 
@@ -137,6 +145,15 @@ export async function buildApp(envOverride?: Partial<Env>): Promise<FastifyInsta
     await app.register(metricsRoutes);
     await app.register(approvalRoutes);
     await app.register(a2aRoutes);
+
+    // Phase 10: Enterprise features
+    await app.register(agentMemoryRoutes);
+    await app.register(conflictResolutionRoutes);
+    await app.register(sandboxRoutes);
+    await app.register(budgetRoutes);
+    await app.register(agentPermissionRoutes);
+    await app.register(agentVersionRoutes);
+    await app.register(resultCacheRoutes);
 
     // Phase 9: Register webhook delivery handler for team events
     registerWebhookDelivery(async (teamUuid, eventType, payload) => {

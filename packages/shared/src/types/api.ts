@@ -36,7 +36,11 @@ export type ApiErrorCode =
   | 'WORKFLOW_INVALID'
   | 'AGENT_NOT_FOUND'
   | 'WORKFLOW_NOT_FOUND'
-  | 'WORKFLOW_NOT_COMPLETE';
+  | 'WORKFLOW_NOT_COMPLETE'
+  | 'BUDGET_EXCEEDED'
+  | 'RESOURCE_LOCKED'
+  | 'PERMISSION_DENIED'
+  | 'VERSION_CONFLICT';
 
 export interface PaginationQuery {
   page?: number;

@@ -25,7 +25,11 @@ export async function truncateAllTables(pool: Pool): Promise<void> {
   await pool.query(`
     TRUNCATE TABLE approval_gates, webhook_deliveries, webhooks, task_metrics,
                    agent_messages, kanban_tasks, team_members, teams,
-                   execution_logs, stage_executions, workflow_runs, agents, api_tokens, users
+                   execution_logs, stage_executions, workflow_runs,
+                   agent_memory, resource_locks, budgets,
+                   agent_permissions, agent_permission_logs,
+                   agent_versions, sandbox_runs,
+                   agents, api_tokens, users
     RESTART IDENTITY CASCADE
   `);
 }
