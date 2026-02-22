@@ -26,6 +26,8 @@ import { analyticsRoutes } from './modules/analytics/routes.js';
 import { agentOpsRoutes } from './modules/agent-ops/routes.js';
 import { webhookRoutes } from './modules/webhooks/routes.js';
 import { metricsRoutes } from './modules/metrics/routes.js';
+import { approvalRoutes } from './modules/approvals/routes.js';
+import { a2aRoutes } from './modules/a2a/routes.js';
 import { registerWebhookDelivery } from './lib/event-bus.js';
 import { deliverWebhookEvent } from './modules/webhooks/service.js';
 
@@ -133,6 +135,8 @@ export async function buildApp(envOverride?: Partial<Env>): Promise<FastifyInsta
     await app.register(agentOpsRoutes);
     await app.register(webhookRoutes);
     await app.register(metricsRoutes);
+    await app.register(approvalRoutes);
+    await app.register(a2aRoutes);
 
     // Phase 9: Register webhook delivery handler for team events
     registerWebhookDelivery(async (teamUuid, eventType, payload) => {

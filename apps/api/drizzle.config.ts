@@ -20,6 +20,7 @@ export default defineConfig({
     './src/db/schema/notifications.ts',
     './src/db/schema/webhooks.ts',
     './src/db/schema/task-metrics.ts',
+    './src/db/schema/approval-gates.ts',
   ],
   out: './drizzle',
   dialect: 'postgresql',

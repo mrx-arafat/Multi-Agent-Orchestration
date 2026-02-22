@@ -29,6 +29,7 @@ import {
   reportStatus,
   delegateTask,
   updateTaskProgress,
+  requestApprovalFromAgent,
 } from './service.js';
 
 const agentParamSchema = {
@@ -387,6 +388,47 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
       const { step, total, message } = request.body as { step: number; total: number; message?: string };
       const result = await updateTaskProgress(app.db, uuid, taskUuid, step, total, message);
       return reply.send({ success: true, data: result });
+    },
+  );
+
+  // ── Phase 10: Agent Approval Request ────────────────────────────────
+
+  /**
+   * POST /agent-ops/agents/:uuid/request-approval
+   * Agent requests human approval before proceeding with a sensitive operation.
+   */
+  app.post(
+    '/agent-ops/agents/:uuid/request-approval',
+    {
+      schema: {
+        ...agentParamSchema,
+        body: {
+          type: 'object',
+          required: ['title'],
+          properties: {
+            title: { type: 'string', minLength: 1, maxLength: 500 },
+            description: { type: 'string', maxLength: 4096 },
+            taskUuid: { type: 'string', format: 'uuid' },
+            approvers: { type: 'array', items: { type: 'string', format: 'uuid' } },
+            expiresInMs: { type: 'integer', minimum: 60000 },
+            context: { type: 'object' },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { uuid } = request.params as { uuid: string };
+      const body = request.body as {
+        title: string;
+        description?: string;
+        taskUuid?: string;
+        approvers?: string[];
+        expiresInMs?: number;
+        context?: Record<string, unknown>;
+      };
+      const gate = await requestApprovalFromAgent(app.db, uuid, body);
+      return reply.status(201).send({ success: true, data: gate });
     },
   );
 }

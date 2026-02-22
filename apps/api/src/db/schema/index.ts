@@ -13,3 +13,4 @@ export * from './workflow-templates.js';
 export * from './notifications.js';
 export * from './webhooks.js';
 export * from './task-metrics.js';
+export * from './approval-gates.js';

@@ -38,6 +38,15 @@ export function emitTeamEvent(
   eventBus.emit({ channel: `team:${teamUuid}`, type, payload });
 }
 
+/** Convenience: emit to a specific agent */
+export function emitAgentEvent(
+  agentUuid: string,
+  type: string,
+  payload: Record<string, unknown>,
+): void {
+  eventBus.emit({ channel: `agent:${agentUuid}`, type, payload });
+}
+
 /** Convenience: emit to a specific user */
 export function emitUserEvent(
   userUuid: string,

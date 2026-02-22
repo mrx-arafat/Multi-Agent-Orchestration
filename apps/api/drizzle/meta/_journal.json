@@ -57,6 +57,13 @@
       "when": 1771732959251,
       "tag": "0007_lyrical_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1771737438531,
+      "tag": "0008_red_maximus",
+      "breakpoints": true
     }
   ]
 }

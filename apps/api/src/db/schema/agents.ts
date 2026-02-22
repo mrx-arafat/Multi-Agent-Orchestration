@@ -5,6 +5,7 @@ import {
   varchar,
   text,
   integer,
+  boolean,
   pgEnum,
   timestamp,
 } from 'drizzle-orm/pg-core';
@@ -32,6 +33,9 @@ export const agents = pgTable('agents', {
   teamUuid: uuid('team_uuid'), // Team this agent belongs to (null = unassigned)
   status: agentStatusEnum('status').notNull().default('offline'),
   lastHealthCheck: timestamp('last_health_check'),
+  // Phase 10: Persistent WebSocket connections
+  wsConnected: boolean('ws_connected').notNull().default(false),
+  lastHeartbeat: timestamp('last_heartbeat'),
   // Which user registered this agent (for ownership checks)
   registeredByUserUuid: uuid('registered_by_user_uuid'),
   createdAt: timestamp('created_at').defaultNow().notNull(),

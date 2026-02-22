@@ -8,7 +8,7 @@ import { eq, and, sql, isNull, desc } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
 import { agents, kanbanTasks, teamMembers, teams } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
-import { emitTeamEvent } from '../../lib/event-bus.js';
+import { emitTeamEvent, emitAgentEvent } from '../../lib/event-bus.js';
 
 // ── Agent Onboarding ──────────────────────────────────────────────────
 
@@ -248,6 +248,16 @@ export async function startTask(
     taskUuid,
     agentUuid,
     status: 'in_progress',
+  });
+
+  // Push task to agent via dedicated agent channel (for WebSocket-connected agents)
+  emitAgentEvent(agentUuid, 'task:push', {
+    taskUuid: updated.taskUuid,
+    title: updated.title,
+    description: updated.description ?? null,
+    priority: updated.priority,
+    tags: updated.tags,
+    action: 'start',
   });
 
   return {
@@ -748,6 +758,45 @@ export async function updateTaskProgress(
   });
 
   return { taskUuid, step, total, message: message ?? null };
+}
+
+// ── Agent Approval Request ────────────────────────────────────────────
+
+/**
+ * Agent requests human approval before proceeding with a sensitive operation.
+ */
+export async function requestApprovalFromAgent(
+  db: Database,
+  agentUuid: string,
+  params: {
+    title: string;
+    description?: string;
+    taskUuid?: string;
+    approvers?: string[];
+    expiresInMs?: number;
+    context?: Record<string, unknown>;
+  },
+): Promise<unknown> {
+  const [agent] = await db
+    .select({ agentUuid: agents.agentUuid, teamUuid: agents.teamUuid })
+    .from(agents)
+    .where(and(eq(agents.agentUuid, agentUuid), isNull(agents.deletedAt)))
+    .limit(1);
+
+  if (!agent) throw ApiError.notFound('Agent');
+  if (!agent.teamUuid) throw ApiError.badRequest('Agent is not assigned to a team');
+
+  const { createApprovalGate } = await import('../approvals/service.js');
+  return createApprovalGate(db, {
+    teamUuid: agent.teamUuid,
+    title: params.title,
+    description: params.description,
+    taskUuid: params.taskUuid,
+    requestedByAgentUuid: agentUuid,
+    approvers: params.approvers,
+    expiresInMs: params.expiresInMs,
+    context: params.context,
+  });
 }
 
 // ── Agent Status Reporting ────────────────────────────────────────────
