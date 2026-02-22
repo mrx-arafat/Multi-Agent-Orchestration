@@ -12,7 +12,7 @@
  *   A2A Artifact    → MAOF task output
  *   A2A TaskState   → MAOF task status
  */
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, sql } from 'drizzle-orm';
 import type { Database } from '../../db/index.js';
 import { agents, kanbanTasks } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
@@ -165,23 +165,25 @@ export async function handleMessageSend(
   let targetTeamUuid: string | null = null;
 
   if (capability) {
+    // Match by capability using array overlap
     const [match] = await db
       .select({ teamUuid: agents.teamUuid })
       .from(agents)
       .where(and(
         isNull(agents.deletedAt),
-        eq(agents.status, 'online'),
+        isNotNull(agents.teamUuid),
+        sql`${agents.capabilities} @> ARRAY[${capability}]::text[]`,
       ))
       .limit(1);
     if (match?.teamUuid) targetTeamUuid = match.teamUuid;
   }
 
   if (!targetTeamUuid) {
-    // Fallback: pick the first active agent's team
+    // Fallback: pick any agent that has a team
     const [any] = await db
       .select({ teamUuid: agents.teamUuid })
       .from(agents)
-      .where(and(isNull(agents.deletedAt)))
+      .where(and(isNull(agents.deletedAt), isNotNull(agents.teamUuid)))
       .limit(1);
     if (!any?.teamUuid) throw ApiError.badRequest('No agents available');
     targetTeamUuid = any.teamUuid;
