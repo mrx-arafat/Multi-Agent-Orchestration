@@ -30,6 +30,27 @@ const simpleWorkflow = {
 };
 
 beforeAll(async () => {
+  // Inject test signing keys into process.env BEFORE anything else.
+  // The audit signing service reads keys via parseEnv() which falls back to process.env.
+  // When running after other test files (singleFork), a stale BullMQ worker may call
+  // parseEnv() after the cache was reset, picking up whatever is in process.env.
+  // By setting process.env here, even stale workers use the correct key pair.
+  process.env['MAOF_AUDIT_SIGNING_KEY'] = privateKey;
+  process.env['MAOF_AUDIT_SIGNING_PUBLIC_KEY'] = publicKey;
+
+  // Flush stale BullMQ jobs to prevent cross-test interference.
+  const ioredis = await import('ioredis');
+  const Redis = ioredis.default ?? ioredis;
+  const tmpRedis = new (Redis as unknown as new (opts: Record<string, unknown>) => import('ioredis').Redis)({
+    host: process.env['MAOF_REDIS_HOST'] ?? 'localhost',
+    port: Number(process.env['MAOF_REDIS_PORT'] ?? 6379),
+    password: process.env['MAOF_REDIS_PASSWORD'] || undefined,
+    maxRetriesPerRequest: 3,
+  });
+  const staleKeys = await tmpRedis.keys('bull:workflow-execution:*');
+  if (staleKeys.length > 0) await tmpRedis.del(...staleKeys);
+  await tmpRedis.quit();
+
   app = await createTestApp({
     MAOF_AUDIT_SIGNING_KEY: privateKey,
     MAOF_AUDIT_SIGNING_PUBLIC_KEY: publicKey,

@@ -153,6 +153,19 @@ export function buildAgentProtocol(baseUrl: string, capabilities: string[]): Age
         method: 'GET (inbound)',
         required: true,
       },
+      {
+        step: 10,
+        phase: 'SUBSCRIBE_EVENTS',
+        description:
+          'Subscribe to real-time events instead of polling your inbox. ' +
+          'Use SSE (GET /agent-ops/agents/:uuid/events) for persistent streams, ' +
+          'or long-poll (GET /agent-ops/agents/:uuid/events/poll) for HTTP-only clients like chat bots. ' +
+          'Events include messages, task assignments, and team activity. ' +
+          'First connection automatically marks you online.',
+        endpoint: '/agent-ops/agents/:uuid/events/poll',
+        method: 'GET',
+        required: false,
+      },
     ],
 
     capabilities,
@@ -318,6 +331,26 @@ export function buildAgentProtocol(baseUrl: string, capabilities: string[]): Age
         path: '/agents?capability=text.summarize&status=online',
         description: 'List agents filtered by capability and status',
         category: 'discovery',
+      },
+
+      // === Real-Time Event Delivery ===
+      {
+        method: 'GET',
+        path: '/agent-ops/agents/:uuid/events',
+        description:
+          'SSE stream for real-time events. Returns text/event-stream with id, event type, and JSON data. ' +
+          'Use ?lastEventId=N to resume after reconnect. Auto-marks agent online.',
+        category: 'events',
+        responseExample: { id: 42, event: 'message:new', data: { fromAgentUuid: '...', subject: '...' } },
+      },
+      {
+        method: 'GET',
+        path: '/agent-ops/agents/:uuid/events/poll',
+        description:
+          'Long-poll for events. Blocks up to ?timeout=30000ms (1000-60000). Returns buffered events or empty ' +
+          'array on timeout. Use ?lastEventId=N to filter already-seen events. Auto-marks agent online.',
+        category: 'events',
+        responseExample: { success: true, data: { events: [{ id: 1, type: 'message:new', payload: {}, timestamp: '...' }], count: 1 } },
       },
     ],
 

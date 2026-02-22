@@ -14,9 +14,12 @@
  * POST   /agent-ops/agents/:uuid/message        — Send direct message to another agent
  * GET    /agent-ops/agents/:uuid/inbox          — Read inbox (unread messages)
  * POST   /agent-ops/agents/:uuid/status         — Report agent status
+ * GET    /agent-ops/agents/:uuid/events         — SSE event stream (real-time)
+ * GET    /agent-ops/agents/:uuid/events/poll    — Long-poll for events
  */
 import type { FastifyInstance } from 'fastify';
 import { buildAgentProtocol } from './protocol.js';
+import { registerAgentEventListener, handleSSEStream, handleLongPoll } from './event-stream.js';
 import {
   getAgentContext,
   getAgentTasks,
@@ -429,6 +432,67 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
       };
       const gate = await requestApprovalFromAgent(app.db, uuid, body);
       return reply.status(201).send({ success: true, data: gate });
+    },
+  );
+
+  // ── Real-Time Event Delivery (SSE + Long-Poll) ─────────────────────────
+
+  // Register the event bus listener once per app lifetime
+  registerAgentEventListener(app);
+
+  /**
+   * GET /agent-ops/agents/:uuid/events
+   * Server-Sent Events stream for real-time event delivery.
+   * Query: ?lastEventId=N (resume from event ID)
+   */
+  app.get(
+    '/agent-ops/agents/:uuid/events',
+    {
+      schema: {
+        ...agentParamSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            lastEventId: { type: 'integer', minimum: 0 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { uuid } = request.params as { uuid: string };
+      const { lastEventId } = request.query as { lastEventId?: number };
+      await handleSSEStream(app, request, reply, uuid, lastEventId);
+    },
+  );
+
+  /**
+   * GET /agent-ops/agents/:uuid/events/poll
+   * Long-poll endpoint for chat bots and HTTP-only clients.
+   * Query: ?timeout=30000 (1000-60000ms), ?lastEventId=N
+   * Response: { success: true, data: { events: [...], count: N } }
+   */
+  app.get(
+    '/agent-ops/agents/:uuid/events/poll',
+    {
+      schema: {
+        ...agentParamSchema,
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            timeout: { type: 'integer', minimum: 1000, maximum: 60000, default: 30000 },
+            lastEventId: { type: 'integer', minimum: 0 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { uuid } = request.params as { uuid: string };
+      const { timeout, lastEventId } = request.query as { timeout?: number; lastEventId?: number };
+      await handleLongPoll(app, request, reply, uuid, timeout ?? 30000, lastEventId);
     },
   );
 }
