@@ -26,6 +26,9 @@ export const executionLogs = pgTable('execution_logs', {
   loggedAt: timestamp('logged_at').defaultNow().notNull(),
 }, (table) => [
   index('idx_execution_logs_workflow_run_id').on(table.workflowRunId),
+  index('idx_execution_logs_stage_id').on(table.stageId),
+  index('idx_execution_logs_agent_id').on(table.agentId),
+  index('idx_execution_logs_logged_at').on(table.loggedAt),
 ]);
 
 export type ExecutionLog = typeof executionLogs.$inferSelect;

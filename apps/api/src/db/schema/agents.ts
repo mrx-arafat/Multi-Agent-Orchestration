@@ -8,6 +8,7 @@ import {
   boolean,
   pgEnum,
   timestamp,
+  index,
 } from 'drizzle-orm/pg-core';
 
 export const agentStatusEnum = pgEnum('agent_status', ['online', 'degraded', 'offline']);
@@ -41,7 +42,12 @@ export const agents = pgTable('agents', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   deletedAt: timestamp('deleted_at'), // Soft delete
-});
+}, (table) => [
+  index('idx_agents_team_uuid').on(table.teamUuid),
+  index('idx_agents_status').on(table.status),
+  index('idx_agents_deleted_at').on(table.deletedAt),
+  index('idx_agents_registered_by').on(table.registeredByUserUuid),
+]);
 
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;

@@ -20,6 +20,7 @@
 import type { FastifyInstance } from 'fastify';
 import { buildAgentProtocol } from './protocol.js';
 import { registerAgentEventListener, handleSSEStream, handleLongPoll } from './event-stream.js';
+import { parseEnv } from '../../config/env.js';
 import {
   getAgentContext,
   getAgentTasks,
@@ -413,7 +414,7 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
             description: { type: 'string', maxLength: 4096 },
             taskUuid: { type: 'string', format: 'uuid' },
             approvers: { type: 'array', items: { type: 'string', format: 'uuid' } },
-            expiresInMs: { type: 'integer', minimum: 60000 },
+            expiresInMs: { type: 'integer', minimum: parseEnv().MAOF_APPROVAL_MIN_EXPIRY_MS },
             context: { type: 'object' },
           },
         },
@@ -482,7 +483,7 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
           type: 'object',
           additionalProperties: false,
           properties: {
-            timeout: { type: 'integer', minimum: 1000, maximum: 60000, default: 30000 },
+            timeout: { type: 'integer', minimum: 1000, maximum: parseEnv().MAOF_LONGPOLL_TIMEOUT_MAX_MS, default: parseEnv().MAOF_LONGPOLL_TIMEOUT_DEFAULT_MS },
             lastEventId: { type: 'integer', minimum: 0 },
           },
         },
@@ -492,7 +493,7 @@ export async function agentOpsRoutes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const { uuid } = request.params as { uuid: string };
       const { timeout, lastEventId } = request.query as { timeout?: number; lastEventId?: number };
-      await handleLongPoll(app, request, reply, uuid, timeout ?? 30000, lastEventId);
+      await handleLongPoll(app, request, reply, uuid, timeout ?? parseEnv().MAOF_LONGPOLL_TIMEOUT_DEFAULT_MS, lastEventId);
     },
   );
 }

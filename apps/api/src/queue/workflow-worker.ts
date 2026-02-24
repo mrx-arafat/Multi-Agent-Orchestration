@@ -248,7 +248,9 @@ export async function executeStageWithRetry(
           const response = await callAgent(agent.endpoint, authToken, request, timeoutMs);
           // Record response time for smart routing scoring
           if (redis) {
-            await recordAgentResponseTime(redis, agent.agentUuid, Date.now() - callStart).catch(() => {});
+            await recordAgentResponseTime(redis, agent.agentUuid, Date.now() - callStart).catch((err) => {
+              console.error('[workflow-worker] Failed to record agent response time:', agent.agentUuid, err);
+            });
           }
           const result: { output: Record<string, unknown>; agentId: string; memoryWrites?: Record<string, unknown> } = {
             agentId: agent.agentId,
@@ -270,7 +272,9 @@ export async function executeStageWithRetry(
               action: 'retry',
               input: resolvedInput,
               status: `retry_${retry + 1}_of_${maxRetries}`,
-            }).catch(() => {}); // Best-effort audit
+            }).catch((err) => {
+              console.error('[workflow-worker] Failed to log retry audit:', stage.id, err);
+            });
 
             await sleep(delay);
             continue;
@@ -289,7 +293,9 @@ export async function executeStageWithRetry(
       }
     } finally {
       // Always decrement task count when done with this agent
-      if (redis) await decrementAgentTasks(redis, agent.agentUuid).catch(() => {});
+      if (redis) await decrementAgentTasks(redis, agent.agentUuid).catch((err) => {
+        console.error('[workflow-worker] Failed to decrement agent task count:', agent.agentUuid, err);
+      });
     }
   }
 
@@ -379,7 +385,9 @@ export function createWorkflowWorker(
             // Persist agent memory_writes to Redis (SRS FR-3.3)
             if (memoryWrites && redis) {
               for (const [key, value] of Object.entries(memoryWrites)) {
-                await writeMemory(redis, { workflowRunId, key, value }).catch(() => {});
+                await writeMemory(redis, { workflowRunId, key, value }).catch((err) => {
+                  console.error('[workflow-worker] Failed to persist agent memory write:', key, err);
+                });
               }
             }
 
@@ -408,7 +416,9 @@ export function createWorkflowWorker(
 
             // Cache stage output in Redis for fast context lookups
             if (redis) {
-              await cacheStageOutput(redis, workflowRunId, stage.id, output).catch(() => {});
+              await cacheStageOutput(redis, workflowRunId, stage.id, output).catch((err) => {
+                console.error('[workflow-worker] Failed to cache stage output:', stage.id, err);
+              });
             }
 
             return { stage, output, agentId };
@@ -434,7 +444,9 @@ export function createWorkflowWorker(
               action: 'fail',
               input: resolvedInput,
               status: 'failed',
-            }).catch(() => {});
+            }).catch((logErr) => {
+              console.error('[workflow-worker] Failed to log stage failure audit:', stage.id, logErr);
+            });
 
             // Re-throw with stage context attached
             const stageError = new Error(`Stage '${stage.id}' failed: ${errorMessage}`);
@@ -472,7 +484,9 @@ export function createWorkflowWorker(
             title: `Workflow "${definition.name}" failed`,
             body: errorMessage,
             metadata: { workflowRunId, stageId: failedStageId },
-          }).catch(() => {});
+          }).catch((notifErr) => {
+            console.error('[workflow-worker] Failed to create failure notification:', workflowRunId, notifErr);
+          });
 
           throw err;
         }
@@ -513,7 +527,9 @@ export function createWorkflowWorker(
         title: `Workflow "${definition.name}" completed`,
         body: `All ${totalStageCount} stages completed successfully.`,
         metadata: { workflowRunId },
-      }).catch(() => {});
+      }).catch((notifErr) => {
+        console.error('[workflow-worker] Failed to create completion notification:', workflowRunId, notifErr);
+      });
 
       const lastLevel = levels.at(-1);
       const lastStage = lastLevel?.at(-1);

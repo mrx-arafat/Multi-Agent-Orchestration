@@ -2,37 +2,31 @@
  * Kanban task board routes.
  * All routes are scoped to /teams/:teamUuid/kanban — team isolation enforced.
  *
- * POST   /teams/:teamUuid/kanban/tasks          — create a task
- * GET    /teams/:teamUuid/kanban/tasks          — list tasks (filterable)
+ * POST   /teams/:teamUuid/kanban/tasks                  — create a task
+ * GET    /teams/:teamUuid/kanban/tasks                  — list tasks (filterable)
+ * GET    /teams/:teamUuid/kanban/tasks/:taskUuid        — get single task
+ * PATCH  /teams/:teamUuid/kanban/tasks/:taskUuid        — edit task fields
+ * DELETE /teams/:teamUuid/kanban/tasks/:taskUuid        — delete a task
  * POST   /teams/:teamUuid/kanban/tasks/:taskUuid/claim  — agent claims a task
  * PATCH  /teams/:teamUuid/kanban/tasks/:taskUuid/status — update task status
- * GET    /teams/:teamUuid/kanban/summary        — board summary (counts by status)
+ * GET    /teams/:teamUuid/kanban/summary                — board summary (counts by status)
  */
 import type { FastifyInstance } from 'fastify';
 import {
   createTask,
   listTasks,
+  getTask,
+  updateTask,
+  deleteTask,
   claimTask,
   updateTaskStatus,
   getBoardSummary,
 } from './service.js';
 import { getTaskDependencyContext } from './context-resolver.js';
 import { assertTeamMember } from '../teams/service.js';
+import { teamUuidParam, teamResourceParam } from '../../lib/schema-utils.js';
 
-const teamUuidParam = {
-  type: 'object',
-  required: ['teamUuid'],
-  properties: { teamUuid: { type: 'string', format: 'uuid' } },
-} as const;
-
-const taskUuidParam = {
-  type: 'object',
-  required: ['teamUuid', 'taskUuid'],
-  properties: {
-    teamUuid: { type: 'string', format: 'uuid' },
-    taskUuid: { type: 'string', format: 'uuid' },
-  },
-} as const;
+const taskUuidParam = teamResourceParam('taskUuid');
 
 export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
   // POST /teams/:teamUuid/kanban/tasks
@@ -185,6 +179,75 @@ export async function kanbanRoutes(app: FastifyInstance): Promise<void> {
       const { status, result, output } = request.body as { status: string; result?: string; output?: Record<string, unknown> };
       const task = await updateTaskStatus(app.db, taskUuid, teamUuid, status, result, output);
       return reply.send({ success: true, data: task });
+    },
+  );
+
+  // GET /teams/:teamUuid/kanban/tasks/:taskUuid
+  app.get(
+    '/teams/:teamUuid/kanban/tasks/:taskUuid',
+    {
+      schema: { params: taskUuidParam },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { teamUuid, taskUuid } = request.params as { teamUuid: string; taskUuid: string };
+      await assertTeamMember(app.db, teamUuid, request.user.sub);
+
+      const task = await getTask(app.db, taskUuid, teamUuid);
+      return reply.send({ success: true, data: task });
+    },
+  );
+
+  // PATCH /teams/:teamUuid/kanban/tasks/:taskUuid — edit task fields
+  app.patch(
+    '/teams/:teamUuid/kanban/tasks/:taskUuid',
+    {
+      schema: {
+        params: taskUuidParam,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            title: { type: 'string', minLength: 1, maxLength: 500 },
+            description: { type: ['string', 'null'], maxLength: 4096 },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+            tags: { type: 'array', items: { type: 'string', minLength: 1 } },
+            assignedAgentUuid: { type: ['string', 'null'], format: 'uuid' },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { teamUuid, taskUuid } = request.params as { teamUuid: string; taskUuid: string };
+      await assertTeamMember(app.db, teamUuid, request.user.sub);
+
+      const body = request.body as {
+        title?: string;
+        description?: string | null;
+        priority?: string;
+        tags?: string[];
+        assignedAgentUuid?: string | null;
+      };
+
+      const task = await updateTask(app.db, taskUuid, teamUuid, body);
+      return reply.send({ success: true, data: task });
+    },
+  );
+
+  // DELETE /teams/:teamUuid/kanban/tasks/:taskUuid
+  app.delete(
+    '/teams/:teamUuid/kanban/tasks/:taskUuid',
+    {
+      schema: { params: taskUuidParam },
+      preHandler: [app.authenticate],
+    },
+    async (request, reply) => {
+      const { teamUuid, taskUuid } = request.params as { teamUuid: string; taskUuid: string };
+      await assertTeamMember(app.db, teamUuid, request.user.sub);
+
+      await deleteTask(app.db, taskUuid, teamUuid);
+      return reply.send({ success: true, data: { deleted: true } });
     },
   );
 

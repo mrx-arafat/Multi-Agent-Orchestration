@@ -14,21 +14,9 @@ import {
   respondToApproval,
 } from './service.js';
 import { assertTeamMember } from '../teams/service.js';
+import { teamUuidParam, teamResourceParam } from '../../lib/schema-utils.js';
 
-const teamUuidParam = {
-  type: 'object',
-  required: ['teamUuid'],
-  properties: { teamUuid: { type: 'string', format: 'uuid' } },
-} as const;
-
-const gateParam = {
-  type: 'object',
-  required: ['teamUuid', 'gateUuid'],
-  properties: {
-    teamUuid: { type: 'string', format: 'uuid' },
-    gateUuid: { type: 'string', format: 'uuid' },
-  },
-} as const;
+const gateParam = teamResourceParam('gateUuid');
 
 export async function approvalRoutes(app: FastifyInstance): Promise<void> {
   // POST /teams/:teamUuid/approvals — request approval

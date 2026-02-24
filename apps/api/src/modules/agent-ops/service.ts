@@ -333,7 +333,9 @@ export async function completeTask(
   // Phase 9: Auto-trigger downstream dependent tasks
   if (newStatus === 'done') {
     const { processTaskCompletion } = await import('../kanban/context-resolver.js');
-    processTaskCompletion(db, taskUuid, agent.teamUuid).catch(() => {});
+    processTaskCompletion(db, taskUuid, agent.teamUuid).catch((err) => {
+      console.error('[agent-ops] Failed to process task completion for downstream tasks:', taskUuid, err);
+    });
   }
 
   return {

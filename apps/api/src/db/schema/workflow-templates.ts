@@ -1,4 +1,4 @@
-import { pgTable, serial, text, varchar, boolean, integer, jsonb, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { pgTable, serial, text, varchar, boolean, integer, jsonb, timestamp, uuid, index } from 'drizzle-orm/pg-core';
 
 export const workflowTemplates = pgTable('workflow_templates', {
   id: serial('id').primaryKey(),
@@ -13,4 +13,8 @@ export const workflowTemplates = pgTable('workflow_templates', {
   tags: text('tags').array().notNull().default([]),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index('idx_workflow_templates_created_by').on(table.createdByUserUuid),
+  index('idx_workflow_templates_is_public').on(table.isPublic),
+  index('idx_workflow_templates_category').on(table.category),
+]);

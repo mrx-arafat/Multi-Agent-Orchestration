@@ -15,27 +15,10 @@ import {
   getTimeSeries,
   getOverviewStats,
 } from './service.js';
+import { teamUuidParam, dateRangeQuery } from '../../lib/schema-utils.js';
 
-const teamParamSchema = {
-  params: {
-    type: 'object',
-    required: ['teamUuid'],
-    properties: {
-      teamUuid: { type: 'string', format: 'uuid' },
-    },
-  },
-} as const;
-
-const dateRangeQuerySchema = {
-  querystring: {
-    type: 'object',
-    additionalProperties: false,
-    properties: {
-      dateStart: { type: 'string', format: 'date' },
-      dateEnd: { type: 'string', format: 'date' },
-    },
-  },
-} as const;
+const teamParamSchema = { params: teamUuidParam } as const;
+const dateRangeQuerySchema = { querystring: dateRangeQuery } as const;
 
 export async function analyticsRoutes(app: FastifyInstance): Promise<void> {
   /**

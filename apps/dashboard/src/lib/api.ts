@@ -344,15 +344,33 @@ export async function addTeamMember(
 export interface KanbanTask {
   taskUuid: string;
   teamUuid: string;
+  workflowRunId: string | null;
   title: string;
   description: string | null;
   status: string;
   priority: string;
   tags: string[];
   assignedAgentUuid: string | null;
-  createdByUserUuid: string;
+  createdByAgentUuid: string | null;
+  createdByUserUuid: string | null;
+  parentTaskUuid: string | null;
+  stageId: string | null;
+  result: string | null;
+  dependsOn: string[];
+  inputMapping: unknown | null;
+  output: unknown | null;
+  outputSchema: unknown | null;
+  maxRetries: number;
+  retryCount: number;
+  timeoutMs: number | null;
+  lastError: string | null;
+  progressCurrent: number | null;
+  progressTotal: number | null;
+  progressMessage: string | null;
   createdAt: string;
   updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 export interface KanbanSummary {
@@ -400,6 +418,25 @@ export async function updateKanbanTaskStatus(
     method: 'PATCH',
     body: JSON.stringify({ status }),
   });
+}
+
+export async function getKanbanTask(teamUuid: string, taskUuid: string): Promise<KanbanTask> {
+  return request<KanbanTask>(`/teams/${teamUuid}/kanban/tasks/${taskUuid}`);
+}
+
+export async function updateKanbanTask(
+  teamUuid: string,
+  taskUuid: string,
+  params: { title?: string; description?: string | null; priority?: string; tags?: string[]; assignedAgentUuid?: string | null },
+): Promise<KanbanTask> {
+  return request<KanbanTask>(`/teams/${teamUuid}/kanban/tasks/${taskUuid}`, {
+    method: 'PATCH',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function deleteKanbanTask(teamUuid: string, taskUuid: string): Promise<void> {
+  await request(`/teams/${teamUuid}/kanban/tasks/${taskUuid}`, { method: 'DELETE' });
 }
 
 export async function getKanbanSummary(teamUuid: string): Promise<KanbanSummary> {

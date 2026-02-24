@@ -28,14 +28,9 @@ import {
   listInvitations,
   revokeInvitation,
 } from './invitation-service.js';
+import { teamUuidParam as teamUuidParamObj } from '../../lib/schema-utils.js';
 
-const teamUuidParam = {
-  params: {
-    type: 'object',
-    required: ['teamUuid'],
-    properties: { teamUuid: { type: 'string', format: 'uuid' } },
-  },
-} as const;
+const teamUuidParam = { params: teamUuidParamObj } as const;
 
 export async function teamRoutes(app: FastifyInstance): Promise<void> {
   // POST /teams

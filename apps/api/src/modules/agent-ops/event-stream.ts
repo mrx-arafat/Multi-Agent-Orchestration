@@ -340,7 +340,9 @@ function markAgentOffline(
     .update(agents)
     .set({ status: 'offline', updatedAt: new Date() })
     .where(eq(agents.agentUuid, agentUuid))
-    .catch(() => {});
+    .catch((err) => {
+      app.log.error({ err, agentUuid }, 'event-stream: failed to mark agent offline');
+    });
 
   if (teamUuid) {
     emitTeamEvent(teamUuid, 'agent:offline', {

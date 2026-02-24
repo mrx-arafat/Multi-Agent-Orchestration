@@ -7,6 +7,7 @@ import { createHmac, randomBytes } from 'crypto';
 import type { Database } from '../../db/index.js';
 import { webhooks, webhookDeliveries } from '../../db/schema/index.js';
 import { ApiError } from '../../types/index.js';
+import { parseEnv } from '../../config/env.js';
 
 // ── CRUD ────────────────────────────────────────────────────────────────
 
@@ -194,7 +195,7 @@ export async function deliverWebhookEvent(
           'X-MAOF-Delivery': delivery.deliveryUuid,
         },
         body,
-        signal: AbortSignal.timeout(10000), // 10s timeout
+        signal: AbortSignal.timeout(parseEnv().MAOF_WEBHOOK_TIMEOUT_MS),
       });
 
       if (response.ok) {
@@ -210,7 +211,7 @@ export async function deliverWebhookEvent(
         deliveredCount++;
       } else {
         // Schedule retry with exponential backoff
-        const nextRetry = new Date(Date.now() + 60000); // 1 min
+        const nextRetry = new Date(Date.now() + parseEnv().MAOF_WEBHOOK_RETRY_DELAY_MS);
         await db
           .update(webhookDeliveries)
           .set({
@@ -224,7 +225,7 @@ export async function deliverWebhookEvent(
       }
     } catch (err) {
       // Network error — schedule retry
-      const nextRetry = new Date(Date.now() + 60000);
+      const nextRetry = new Date(Date.now() + parseEnv().MAOF_WEBHOOK_RETRY_DELAY_MS);
       await db
         .update(webhookDeliveries)
         .set({
@@ -285,7 +286,7 @@ export async function retryFailedDeliveries(db: Database): Promise<number> {
           'X-MAOF-Delivery': delivery.deliveryUuid,
         },
         body,
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(parseEnv().MAOF_WEBHOOK_TIMEOUT_MS),
       });
 
       if (response.ok) {
@@ -302,7 +303,8 @@ export async function retryFailedDeliveries(db: Database): Promise<number> {
       } else {
         const newAttempts = delivery.attempts + 1;
         const isExhausted = newAttempts >= delivery.maxAttempts;
-        const backoffMs = Math.min(60000 * Math.pow(2, newAttempts - 1), 3600000); // max 1 hour
+        const env = parseEnv();
+        const backoffMs = Math.min(env.MAOF_WEBHOOK_RETRY_DELAY_MS * Math.pow(2, newAttempts - 1), env.MAOF_WEBHOOK_MAX_BACKOFF_MS);
 
         await db
           .update(webhookDeliveries)
@@ -317,7 +319,8 @@ export async function retryFailedDeliveries(db: Database): Promise<number> {
     } catch {
       const newAttempts = delivery.attempts + 1;
       const isExhausted = newAttempts >= delivery.maxAttempts;
-      const backoffMs = Math.min(60000 * Math.pow(2, newAttempts - 1), 3600000);
+      const env2 = parseEnv();
+      const backoffMs = Math.min(env2.MAOF_WEBHOOK_RETRY_DELAY_MS * Math.pow(2, newAttempts - 1), env2.MAOF_WEBHOOK_MAX_BACKOFF_MS);
 
       await db
         .update(webhookDeliveries)

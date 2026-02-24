@@ -18,12 +18,33 @@ import {
 } from './service.js';
 import { createWorkflowRun } from '../workflows/service.js';
 import { validateWorkflowDefinition, type WorkflowDefinition } from '../workflows/validator.js';
+import { uuidParam } from '../../lib/schema-utils.js';
+
+const templateUuidParam = {
+  type: 'object',
+  required: ['templateUuid'],
+  properties: { templateUuid: { type: 'string', format: 'uuid' } },
+} as const;
 
 export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** GET /templates — list templates */
   app.get(
     '/templates',
-    { preHandler: [app.authenticate] },
+    {
+      schema: {
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            category: { type: 'string', maxLength: 100 },
+            search: { type: 'string', maxLength: 200 },
+            page: { type: 'integer', minimum: 1, default: 1 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const query = request.query as {
         category?: string;
@@ -42,7 +63,10 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** GET /templates/:templateUuid — get template */
   app.get(
     '/templates/:templateUuid',
-    { preHandler: [app.authenticate] },
+    {
+      schema: { params: templateUuidParam },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const { templateUuid } = request.params as { templateUuid: string };
       const template = await getTemplate(app.db, templateUuid);
@@ -53,7 +77,24 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** POST /templates — create template */
   app.post(
     '/templates',
-    { preHandler: [app.authenticate] },
+    {
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name', 'definition'],
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 200 },
+            description: { type: 'string', maxLength: 2000 },
+            category: { type: 'string', maxLength: 100 },
+            definition: { type: 'object' },
+            isPublic: { type: 'boolean', default: true },
+            tags: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 20 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const body = request.body as {
         name: string;
@@ -75,7 +116,24 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** PUT /templates/:templateUuid — update template */
   app.put(
     '/templates/:templateUuid',
-    { preHandler: [app.authenticate] },
+    {
+      schema: {
+        params: templateUuidParam,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 200 },
+            description: { type: 'string', maxLength: 2000 },
+            category: { type: 'string', maxLength: 100 },
+            definition: { type: 'object' },
+            isPublic: { type: 'boolean' },
+            tags: { type: 'array', items: { type: 'string', maxLength: 50 }, maxItems: 20 },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const { templateUuid } = request.params as { templateUuid: string };
       const body = request.body as {
@@ -95,7 +153,10 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** DELETE /templates/:templateUuid — delete template */
   app.delete(
     '/templates/:templateUuid',
-    { preHandler: [app.authenticate] },
+    {
+      schema: { params: templateUuidParam },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const { templateUuid } = request.params as { templateUuid: string };
       await deleteTemplate(app.db, templateUuid, request.user.sub, request.user.role);
@@ -106,7 +167,19 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
   /** POST /templates/:templateUuid/use — instantiate and execute a workflow from template */
   app.post(
     '/templates/:templateUuid/use',
-    { preHandler: [app.authenticate] },
+    {
+      schema: {
+        params: templateUuidParam,
+        body: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            input: { type: 'object' },
+          },
+        },
+      },
+      preHandler: [app.authenticate],
+    },
     async (request, reply) => {
       const { templateUuid } = request.params as { templateUuid: string };
       const { input } = (request.body ?? {}) as { input?: Record<string, unknown> };
@@ -131,8 +204,10 @@ export async function templateRoutes(app: FastifyInstance): Promise<void> {
         { jobId: result.workflowRunId },
       );
 
-      // Increment usage count (best-effort)
-      await incrementUsageCount(app.db, templateUuid).catch(() => {});
+      // Increment usage count (best-effort, log on failure)
+      await incrementUsageCount(app.db, templateUuid).catch((err) => {
+        app.log.warn({ err, templateUuid }, 'Failed to increment template usage count');
+      });
 
       return reply.status(202).send({ success: true, data: result });
     },

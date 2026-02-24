@@ -34,6 +34,8 @@ export const stageExecutions = pgTable('stage_executions', {
   errorMessage: varchar('error_message', { length: 2048 }),
 }, (table) => [
   index('idx_stage_executions_workflow_run_id').on(table.workflowRunId),
+  index('idx_stage_executions_status').on(table.status),
+  index('idx_stage_executions_agent_id').on(table.agentId),
 ]);
 
 export type StageExecution = typeof stageExecutions.$inferSelect;

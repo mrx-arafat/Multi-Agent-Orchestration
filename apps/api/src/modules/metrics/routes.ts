@@ -16,12 +16,7 @@ import {
   getDailyCostTimeSeries,
 } from './service.js';
 import { assertTeamMember } from '../teams/service.js';
-
-const teamUuidParam = {
-  type: 'object',
-  required: ['teamUuid'],
-  properties: { teamUuid: { type: 'string', format: 'uuid' } },
-} as const;
+import { teamUuidParam } from '../../lib/schema-utils.js';
 
 export async function metricsRoutes(app: FastifyInstance): Promise<void> {
   // POST /metrics — record a metric (for agents/internal)

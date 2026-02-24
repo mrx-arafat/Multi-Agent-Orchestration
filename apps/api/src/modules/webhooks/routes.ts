@@ -16,21 +16,9 @@ import {
   listDeliveries,
 } from './service.js';
 import { assertTeamMember } from '../teams/service.js';
+import { teamUuidParam, teamResourceParam } from '../../lib/schema-utils.js';
 
-const teamUuidParam = {
-  type: 'object',
-  required: ['teamUuid'],
-  properties: { teamUuid: { type: 'string', format: 'uuid' } },
-} as const;
-
-const webhookParam = {
-  type: 'object',
-  required: ['teamUuid', 'webhookUuid'],
-  properties: {
-    teamUuid: { type: 'string', format: 'uuid' },
-    webhookUuid: { type: 'string', format: 'uuid' },
-  },
-} as const;
+const webhookParam = teamResourceParam('webhookUuid');
 
 export async function webhookRoutes(app: FastifyInstance): Promise<void> {
   // POST /teams/:teamUuid/webhooks

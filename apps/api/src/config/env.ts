@@ -52,6 +52,20 @@ const envSchema = z.object({
   MAOF_AGENT_CALL_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30000),
   // Agent health check interval (ms). Default: 300000 (5 minutes). Set to 0 to disable.
   MAOF_HEALTH_CHECK_INTERVAL_MS: z.coerce.number().int().min(0).default(300000),
+  // Agent health check timeout per agent (ms)
+  MAOF_HEALTH_CHECK_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
+  // Webhook delivery timeout (ms)
+  MAOF_WEBHOOK_TIMEOUT_MS: z.coerce.number().int().min(1000).default(10000),
+  // Webhook initial retry delay (ms)
+  MAOF_WEBHOOK_RETRY_DELAY_MS: z.coerce.number().int().min(1000).default(60000),
+  // Webhook max backoff cap (ms)
+  MAOF_WEBHOOK_MAX_BACKOFF_MS: z.coerce.number().int().min(1000).default(3600000),
+  // Long-poll default timeout (ms)
+  MAOF_LONGPOLL_TIMEOUT_DEFAULT_MS: z.coerce.number().int().min(1000).default(30000),
+  // Long-poll maximum timeout (ms)
+  MAOF_LONGPOLL_TIMEOUT_MAX_MS: z.coerce.number().int().min(1000).default(60000),
+  // Approval gate minimum expiry (ms)
+  MAOF_APPROVAL_MIN_EXPIRY_MS: z.coerce.number().int().min(1000).default(60000),
 
   // Audit signing — RSA PEM keys for cryptographic audit log signatures (FR-5.2).
   // Optional: auto-generates in dev/test if missing.

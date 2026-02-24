@@ -246,7 +246,9 @@ export async function recordVersionError(
 
   // Auto-rollback if error rate exceeds threshold
   if (errorRate > version.errorThreshold && (version.status === 'canary' || version.status === 'active')) {
-    await rollbackVersion(db, version.agentUuid).catch(() => {});
+    await rollbackVersion(db, version.agentUuid).catch((err) => {
+      console.error('[agent-versions] Auto-rollback failed:', version.agentUuid, err);
+    });
     return { autoRolledBack: true, errorRate };
   }
 

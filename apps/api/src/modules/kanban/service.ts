@@ -275,12 +275,82 @@ export async function updateTaskStatus(
 
   // Phase 9: When a task completes, check and unblock downstream dependent tasks
   if (status === 'done') {
-    processTaskCompletion(db, taskUuid, teamUuid).catch(() => {
-      // Best-effort: don't fail the status update if dependency resolution fails
+    processTaskCompletion(db, taskUuid, teamUuid).catch((err) => {
+      console.error('[kanban] Failed to process downstream task dependencies:', taskUuid, err);
     });
   }
 
   return safe;
+}
+
+/**
+ * Gets a single task by UUID (scoped to team).
+ */
+export async function getTask(
+  db: Database,
+  taskUuid: string,
+  teamUuid: string,
+): Promise<SafeKanbanTask> {
+  const [task] = await db
+    .select()
+    .from(kanbanTasks)
+    .where(and(eq(kanbanTasks.taskUuid, taskUuid), eq(kanbanTasks.teamUuid, teamUuid)))
+    .limit(1);
+
+  if (!task) throw ApiError.notFound('Task');
+  return toSafe(task);
+}
+
+/**
+ * Updates editable fields on a task (title, description, priority, tags, assignedAgentUuid).
+ */
+export async function updateTask(
+  db: Database,
+  taskUuid: string,
+  teamUuid: string,
+  params: {
+    title?: string;
+    description?: string | null;
+    priority?: string;
+    tags?: string[];
+    assignedAgentUuid?: string | null;
+  },
+): Promise<SafeKanbanTask> {
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (params.title !== undefined) updates.title = params.title;
+  if (params.description !== undefined) updates.description = params.description;
+  if (params.priority !== undefined) updates.priority = params.priority;
+  if (params.tags !== undefined) updates.tags = params.tags;
+  if (params.assignedAgentUuid !== undefined) updates.assignedAgentUuid = params.assignedAgentUuid;
+
+  const [updated] = await db
+    .update(kanbanTasks)
+    .set(updates)
+    .where(and(eq(kanbanTasks.taskUuid, taskUuid), eq(kanbanTasks.teamUuid, teamUuid)))
+    .returning();
+
+  if (!updated) throw ApiError.notFound('Task');
+  const safe = toSafe(updated);
+  emitTeamEvent(teamUuid, 'task:updated', safe as unknown as Record<string, unknown>);
+  return safe;
+}
+
+/**
+ * Deletes a task from the board.
+ */
+export async function deleteTask(
+  db: Database,
+  taskUuid: string,
+  teamUuid: string,
+): Promise<void> {
+  const [deleted] = await db
+    .delete(kanbanTasks)
+    .where(and(eq(kanbanTasks.taskUuid, taskUuid), eq(kanbanTasks.teamUuid, teamUuid)))
+    .returning({ taskUuid: kanbanTasks.taskUuid });
+
+  if (!deleted) throw ApiError.notFound('Task');
+  emitTeamEvent(teamUuid, 'task:deleted', { taskUuid, teamUuid });
 }
 
 /**

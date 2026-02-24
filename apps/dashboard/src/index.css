@@ -28,6 +28,20 @@ body {
   animation: slide-in 0.3s ease-out;
 }
 
+/* Drawer slide-in from right */
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
 /* Smooth scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
